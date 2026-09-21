@@ -42,12 +42,25 @@ class Settings(BaseSettings):
         "postgresql+psycopg://postgres:postgres@localhost:5432/patchpilot"
     )
 
-    # Future Architectural Placeholders (Inactive in Phase 1)
+    # Redis Foundation
     REDIS_URL: str = "redis://localhost:6379/0"
+
+    # Security
     SECRET_KEY: str = "development-secret-key-replace-in-production"
-    AI_API_KEY: str = ""
+
+    # GitHub Integration
     GITHUB_CLIENT_ID: str = ""
     GITHUB_CLIENT_SECRET: str = ""
+    GITHUB_REDIRECT_URI: str = "http://localhost:3000/api/github/callback"
+    GITHUB_API_BASE_URL: str = "https://api.github.com"
+
+    # Future AI API Key placeholder (Inactive in Phase 3)
+    AI_API_KEY: str = ""
+
+    @property
+    def github_configured(self) -> bool:
+        """Check if GitHub OAuth credentials are configured."""
+        return bool(self.GITHUB_CLIENT_ID and self.GITHUB_CLIENT_SECRET)
 
 
 settings = Settings()

@@ -4,62 +4,152 @@
 
 ---
 
-## 🎯 Purpose
+## 🎯 System Overview
 
-**PatchPilot AI** is an agentic developer platform that helps engineering teams understand complex codebases, diagnose bugs and performance regressions, synthesize precise patches, automatically generate reproduction and regression tests, perform static security audits, and assess release readiness before deployment.
+**PatchPilot AI** is an agentic developer platform designed to help engineering teams understand complex repositories, investigate bug reports, synthesize surgically precise code patches, automatically generate regression tests, conduct static security audits, and evaluate release readiness before deployment.
 
-This repository currently hosts the **Phase 1: Foundation & Architecture** milestone.
+### Current Implementation Status
+
+This repository contains the verified implementation of **Phase 1, Phase 2, and Phase 3**:
+
+* **Phase 1 — Foundation & Architecture**: Complete backend gateway, frontend shell, isolated local virtual environments, and baseline testing.
+* **Phase 2 — Professional UI/UX**: Dual-theme high-density developer interface (warm cream light mode & technical slate dark mode), bespoke vector branding, and 10 core application workspaces.
+* **Phase 3 — Backend & GitHub Integration**: Relational persistence in PostgreSQL 16, Alembic migrations, GitHub REST integration with strict SSRF defense, automated Issue vs. Pull Request count separation, and live API synchronization.
+
+> [!IMPORTANT]
+> **What Is Implemented Now vs. What Is Coming in Phase 4+**
+>
+> **Implemented in Phase 3**:
+> * GitHub repository metadata retrieval and registration.
+> * Accurate separation of **Open Issues** and **Open Pull Requests** (resolving GitHub's combined count ambiguity).
+> * Synchronization and persistence of actual GitHub Issues into PostgreSQL.
+> * Exclusion of Pull Requests from issue tables.
+> * Canonical REST API (`/api/v1/repositories`, `/api/v1/issues`, `/api/v1/github/auth/*`).
+> * PostgreSQL 16 persistence via SQLAlchemy 2.0 and Alembic migrations (`0001`, `0002`).
+> * Redis 7 service foundation.
+> * Live data rendering in frontend `/repositories` and `/issues` views with offline fallback.
+> * Hermetic automated test suite (28 tests passing).
+>
+> **NOT Implemented Yet (Reserved for Phase 4 & Phase 5/6)**:
+> * Autonomous multi-agent execution loops.
+> * AI-driven root cause analysis and diagnosis.
+> * LLM patch generation or automatic code synthesis.
+> * Autonomous test execution and sandboxing.
+> * Automated static security AST scanning.
+> * Automated release gate approval intelligence.
 
 ---
 
-## 🏗️ Architecture
-
-The high-level system architecture follows a clean multi-tier topology designed for rapid local iteration and seamless cloud deployment:
+## 🏗️ Architecture & Data Flow
 
 ```text
-Vercel (Client Hosting)
+Next.js 15 Client Tier (Port 3000)
+       │
+       │ HTTP / JSON REST Calls
+       ▼
+FastAPI Gateway Tier (Port 8000)
+       │
+       ├── API Layer (app/api/v1/)
+       │    └── Pydantic v2 Request/Response Validation
+       │
+       ├── Service Layer (app/services/)
+       │    ├── GitHubService (Async HTTP, SSRF defense, Link-header count parser)
+       │    ├── RepositoryService (Database CRUD & metadata sync)
+       │    └── IssueService (Issue ingestion & PR exclusion)
+       │
+       ├── Data & Persistence Layer (app/models/ & app/db/)
+       │    ├── SQLAlchemy 2.0 ORM
+       │    ├── Alembic Migrations (0001, 0002)
+       │    └── PostgreSQL 16 (Repositories, Issues)
+       │
+       └── Task & Cache Broker Foundation (app/core/)
+            └── Redis 7
+```
+
+### Current Repository Connection & Issue Synchronization Flow
+
+```text
+1. User clicks "Connect Repo" in Next.js UI (or POST /api/v1/repositories)
    │
-   ▼
-Next.js 15 (TypeScript, App Router) [Port 3000]
+2. FastAPI validates owner/name format against SSRF and traversal safeguards
    │
-   │ HTTPS / JSON API
-   ▼
-FastAPI (Python Backend) [Port 8000]
+3. GitHubService retrieves repository metadata from GitHub REST API
    │
-   ├── API Layer (/api/health, /api/v1/...)
-   ├── Service Layer (Business Logic)
-   ├── Database Layer (SQLAlchemy + Alembic Migrations)
-   ├── Future Agent Orchestrator (Phase 6)
+4. GitHubService queries /repos/{owner}/{name}/pulls?state=open&per_page=1
+   └── Parses Link header (rel="last") to determine exact open PR count
+   └── Computes pure open issue count: max(0, combined_count - open_pull_requests_count)
    │
-   ├────────────────────────┐
-   ▼                        ▼
-PostgreSQL 16             Redis 7
-(Metadata & Patches)      (Task Queue & Caching - Phase 4)
-                            │
-                            ▼
-                      Future Background Workers (Celery / ARQ)
-                            │
-                            ▼
-                      GitHub API Integration (Phase 5)
+5. RepositoryService persists repository record in PostgreSQL repositories table
+   │
+6. GitHubService queries issues via GitHub Search API (is:issue state:open)
+   └── Filters out any item with pull_request attribute (double defense)
+   │
+7. IssueService syncs genuine issues into PostgreSQL issues table
+   │
+8. Frontend updates /repositories and /issues views with live, verified data
+```
+
+---
+
+## 🛠️ Technology Stack
+
+| Layer | Technologies | Responsibilities |
+|---|---|---|
+| **Frontend** | Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS | High-density developer UI, dual-theme system, typed API abstraction (`lib/api.ts`), responsive data grids. |
+| **Backend Gateway** | FastAPI, Uvicorn, Python 3.11+ / 3.13+, Pydantic v2 | REST routing, input validation, error mapping, dependency injection (`get_db`), OpenAPI documentation (`/docs`). |
+| **HTTP Client** | HTTPX (AsyncClient) | GitHub REST API communication, explicit 10s timeouts, token-free connection, typed exceptions. |
+| **Database** | PostgreSQL 16, SQLAlchemy 2.0, Psycopg 3, Alembic | Relational persistence, transactional migrations (`0001`, `0002`), foreign key cascading. |
+| **Cache & Queue** | Redis 7 | State broker and async queue foundation (prepared for Phase 4 workers). |
+| **Testing** | Pytest, AnyIO, FastAPI TestClient, SQLite (In-Memory) | Hermetic, zero-credential integration testing for all services and endpoints. |
+
+---
+
+## 📁 Repository Structure
+
+```text
+PatchPilot/
+├── frontend/                     # Next.js 15 Frontend Application
+│   ├── app/                      # App Router pages (/repositories, /issues, /agents, etc.)
+│   ├── components/               # Layout, repository modals, diff viewers, icons
+│   ├── lib/api.ts                # Typed client communicating with FastAPI
+│   ├── types/                    # Shared TypeScript domain and API contracts
+│   └── package.json              # Project-local frontend dependencies
+│
+├── backend/                      # FastAPI Python Backend Application
+│   ├── app/
+│   │   ├── api/                  # API routers (v1/repositories, v1/issues, v1/github)
+│   │   ├── core/                 # App settings, environment configuration
+│   │   ├── db/                   # Database sessionmaker and Base declaration
+│   │   ├── models/               # SQLAlchemy models (Repository, Issue)
+│   │   ├── schemas/              # Pydantic validation schemas
+│   │   ├── services/             # GitHubService, RepositoryService, IssueService
+│   │   ├── agents/               # Reserved placeholder for Phase 4 multi-agent engine
+│   │   └── workers/              # Reserved placeholder for async worker pool
+│   ├── alembic/                  # Database migration scripts (0001, 0002)
+│   ├── tests/                    # 28 hermetic unit and integration tests
+│   └── requirements.txt          # Project-local Python dependencies
+│
+├── docs/
+│   └── ARCHITECTURE.md           # System architecture specification
+├── docker-compose.yml            # PostgreSQL 16 (Port 5433:5432) & Redis 7 (Port 6379)
+├── .env.example                  # Root environment blueprint
+└── README.md                     # Root project documentation
 ```
 
 ---
 
 ## 💻 Local Development Setup (Windows / PowerShell)
 
-All dependencies are strictly **project-local** (`frontend/node_modules/` and `backend/.venv/`). No global packages are required or modified.
+All dependencies are strictly **project-local** (`backend/.venv/` and `frontend/node_modules/`). No global packages are modified or required.
 
 ### Prerequisites
-- **Node.js**: v20+ / v22+
-- **Python**: v3.11+ / v3.13+
-- **Git**: Installed
-- *(Optional)* **Docker & Docker Compose**: For local PostgreSQL and Redis
+* **Node.js**: v20+ / v22+
+* **Python**: v3.11+ / v3.13+
+* **Docker & Docker Compose**: For local PostgreSQL and Redis
 
 ---
 
 ### Step 1: Environment Variables Setup
-
-Copy the example environment templates:
 
 ```powershell
 # Root configuration
@@ -74,126 +164,124 @@ Copy-Item frontend\.env.example frontend\.env.local
 
 ---
 
-### Step 2: (Optional) Local Services with Docker
+### Step 2: Start Local Infrastructure with Docker
 
-If Docker is installed on your machine, start PostgreSQL and Redis with a single command:
+Start PostgreSQL on port `5433` and Redis on port `6379`:
 
 ```powershell
 docker compose up -d
 ```
 
-*(Note: Phase 1 backend runs standalone and the health check functions even if Docker services are not running).*
+Verify services are healthy:
+```powershell
+docker ps
+```
 
 ---
 
-### Step 3: Backend Setup (FastAPI + Python)
+### Step 3: Backend Setup & Migrations
 
-1. Open PowerShell and navigate to the `backend` directory:
+1. Open PowerShell and navigate to `backend/`:
    ```powershell
    cd d:\PatchPilot\backend
    ```
 
-2. Create a project-local virtual environment:
-   ```powershell
-   python -m venv .venv
-   ```
-
-3. Activate the virtual environment:
+2. Activate the project-local virtual environment:
    ```powershell
    .\.venv\Scripts\Activate.ps1
    ```
 
-4. Install project-local backend dependencies:
+3. Install project-local dependencies (if not already installed):
    ```powershell
    .\.venv\Scripts\python.exe -m pip install -r requirements.txt
    ```
 
-5. Run test suite to verify installation:
+4. Apply database migrations to PostgreSQL:
    ```powershell
-   .\.venv\Scripts\python.exe -m pytest -v
+   .\.venv\Scripts\alembic.exe upgrade head
    ```
+
+5. Run the automated test suite:
+   ```powershell
+   .\.venv\Scripts\python.exe -m pytest -q
+   ```
+   *(Expected: 28 passed)*
 
 6. Start the FastAPI development server:
    ```powershell
    .\.venv\Scripts\uvicorn.exe app.main:app --reload --port 8000
    ```
 
-- API Base URL: `http://localhost:8000`
-- Interactive Swagger Docs: `http://localhost:8000/docs`
-- Health Endpoint: `http://localhost:8000/api/health`
+* API Base URL: `http://localhost:8000`
+* Interactive API Documentation (Swagger): `http://localhost:8000/docs`
+* Health Endpoint: `http://localhost:8000/api/health`
 
 ---
 
-### Step 4: Frontend Setup (Next.js + TypeScript)
+### Step 4: Frontend Setup
 
-1. Open a new PowerShell terminal and navigate to the `frontend` directory:
+1. Open a new PowerShell terminal and navigate to `frontend/`:
    ```powershell
    cd d:\PatchPilot\frontend
    ```
 
-2. Install project-local dependencies:
+2. Install project-local dependencies (if not already installed):
    ```powershell
    npm install
    ```
 
-3. Build or typecheck the frontend:
+3. Verify production compilation and type safety:
    ```powershell
    npm run build
    ```
+   *(Expected: 14/14 static & dynamic routes compiled, Exit code 0)*
 
 4. Start the Next.js development server:
    ```powershell
    npm run dev
    ```
 
-- Frontend UI: `http://localhost:3000`
+* Frontend Dashboard: `http://localhost:3000`
+* Connected Repositories View: `http://localhost:3000/repositories`
+* Synchronized Issues View: `http://localhost:3000/issues`
 
 ---
 
-## 📁 Monorepo Structure
+## 🔌 API Overview (Canonical v1)
 
-```text
-PatchPilot/
-├── frontend/                     # Next.js 15 + TypeScript Frontend
-│   ├── app/                      # App router pages & layouts
-│   ├── components/               # React UI components
-│   ├── lib/                      # API client abstractions
-│   ├── types/                    # Shared TypeScript interfaces
-│   ├── public/                   # Static assets
-│   ├── package.json              # Project-local frontend dependencies
-│   ├── tsconfig.json             # TypeScript configuration
-│   └── tailwind.config.ts        # Tailwind CSS styling
-│
-├── backend/                      # Python + FastAPI Backend
-│   ├── app/
-│   │   ├── main.py               # FastAPI entrypoint & middleware
-│   │   ├── api/                  # API routing layer
-│   │   ├── core/                 # Config & environment settings
-│   │   ├── db/                   # SQLAlchemy engine, session & Base
-│   │   ├── schemas/              # Pydantic validation schemas
-│   │   ├── services/             # Core business logic layer
-│   │   ├── models/               # SQLAlchemy models (Phase 3 placeholder)
-│   │   ├── agents/               # AI Agent layer (Phase 6 placeholder)
-│   │   └── workers/              # Background workers (Phase 4 placeholder)
-│   ├── alembic/                  # Database migration management
-│   ├── tests/                    # Pytest verification suite
-│   ├── requirements.txt          # Project-local backend dependencies
-│   └── alembic.ini               # Alembic configuration
-│
-├── docs/
-│   └── ARCHITECTURE.md           # System architecture specification
-│
-├── docker-compose.yml            # Local PostgreSQL & Redis services
-├── .gitignore                    # Version control ignore definitions
-├── .env.example                  # Root environment variables blueprint
-└── README.md                     # Project overview and developer handbook
-```
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/health` | Health verification endpoint (backward-compatible). |
+| `GET` | `/api/v1/health` | Versioned health verification endpoint. |
+| `GET` | `/api/v1/repositories` | List all tracked repositories with separated issue and PR counts. |
+| `POST` | `/api/v1/repositories` | Connect a GitHub repository, fetch metadata, separate Issue/PR counts, and sync issues. |
+| `GET` | `/api/v1/repositories/{id}` | Retrieve tracked repository details by database ID. |
+| `GET` | `/api/v1/repositories/{id}/issues` | Retrieve all synchronized issues for a specific repository. |
+| `GET` | `/api/v1/repositories/{id}/contents` | Browse files and directories in the repository tree via GitHub API. |
+| `GET` | `/api/v1/issues` | List all tracked issues across repositories (supports `repository_id` and `state` filters). |
+| `GET` | `/api/v1/issues/{id}` | Retrieve specific issue details by primary key ID. |
+| `GET` | `/api/v1/github/auth/start` | Generate GitHub OAuth authorization URL with state parameter. |
+| `GET` | `/api/v1/github/auth/callback` | Exchange temporary GitHub OAuth code for access token. |
 
 ---
 
-## 🛡️ Security Baseline
+## 🧪 Current Verification Status
 
-- **No Hardcoded Secrets**: All dynamic credentials rely exclusively on environment variables.
-- **Git Safety**: `.env` and `.env.*.local` are strictly ignored in `.gitignore`.
-- **Zero Global Contamination**: Python uses local `.venv/`; Node uses local `node_modules/`.
-- **CORS Restricted**: Controlled strictly via `BACKEND_CORS_ORIGINS`.
+* **Backend Tests**: 28 passed in 6.10s (`pytest -q` on Python 3.13).
+* **Frontend Build**: 14 routes compiled cleanly with 0 TypeScript/lint errors (`npm run build` on Next.js 15.5.25).
+* **Database Verification**: Real PostgreSQL queries against `patchpilot-postgres` on port `5433` verify:
+  * Repository `fastapi/fastapi` stores `open_issues_count = 1` and `open_pull_requests_count = 81`.
+  * Issues table stores the actual GitHub Issue `#10370` and excludes all 81 Pull Requests.
+* **Security Checks**: Strict SSRF and directory traversal defenses validated on all repository input parameters.
+
+---
+
+## 🔮 Roadmap: Upcoming Phase 4 (AI Agent Engine)
+
+Phase 3 establishes the stable data, API, and persistence foundation. **Phase 4** will introduce the autonomous engineering intelligence:
+
+1. **Orchestrator Agent**: Managing the issue lifecycle through diagnosis, patch synthesis, test execution, and release verification.
+2. **Repository Intelligence Agent**: AST indexing, call-graph analysis, and root cause localization.
+3. **Patch Synthesis Agent**: Generating surgical unified diffs solving detected faults.
+4. **Regression Test Synthesis Agent**: Automatically synthesizing tests that reproduce the failure before the patch and pass after application.
+5. **Security Audit Agent**: Evaluating generated patches against CWE/OWASP vulnerability patterns.
