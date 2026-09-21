@@ -1,0 +1,51 @@
+# PatchPilot AI — Local Development Services
+# ==============================================================================
+# This Docker Compose file provides local PostgreSQL and Redis instances for
+# developer convenience. Phase 1 runs standalone and does not require Docker
+# to be running for basic backend and frontend verification.
+#
+# Usage:
+#   docker compose up -d
+#   docker compose down
+# ==============================================================================
+
+services:
+  # Primary relational database for repository metadata, patch jobs, and results
+  postgres:
+    image: postgres:16-alpine
+    container_name: patchpilot-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: patchpilot
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d patchpilot"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # In-memory cache & message broker reserved for future background agent tasks (Phase 4)
+  redis:
+    image: redis:7-alpine
+    container_name: patchpilot-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
