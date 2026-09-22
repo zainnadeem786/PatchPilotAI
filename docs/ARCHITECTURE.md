@@ -28,7 +28,7 @@ flowchart TD
         RedisCache[(Redis 7 Task Broker & State)]
     end
 
-    subgraph Agent & Worker Tier ["Future Agent & Worker Tier (Phase 4 & 6)"]
+    subgraph Agent & Worker Tier ["Agent Tier (Phase 4, Implemented) & Future Worker Tier"]
         Workers["Distributed Worker Pool (Celery / ARQ)"]
         AgentOrch["Orchestrator Agent"]
         RepoAgent["Repository Intelligence Agent"]
@@ -50,7 +50,7 @@ flowchart TD
     Alembic --> PG
 
     %% Future Phase Connections
-    ServiceLayer -.->|Enqueue Tasks (Phase 4)| RedisCache
+    ServiceLayer -.->|Enqueue Tasks (Future Async Workers)| RedisCache
     RedisCache -.-> Workers
     Workers -.-> AgentOrch
     AgentOrch -.-> RepoAgent & PatchAgent & TestAgent & AuditAgent
@@ -124,20 +124,31 @@ HTTP Request (GET /api/health)
 
 ---
 
-## 5. Future Agent Architecture (Phase 4 & 6 Design Blueprint)
+## 5. Agent Architecture (Phase 4 — Implemented)
 
-The `backend/app/agents/` directory is reserved for autonomous multi-agent pipelines:
+The `backend/app/agents/` directory implements the multi-agent pipeline,
+orchestrated by `AgentPipeline` and exposed via `POST
+/api/v1/issues/{issue_id}/analyze`:
 
 1. **Orchestrator Agent**:
    - Manages workflow state transitions: `Triage -> Root Cause Analysis -> Patch Generation -> Test Synthesis -> Static Audit -> Verification`.
 2. **Repository Intelligence Agent**:
-   - Indexes repository ASTs, call graphs, symbol tables, and commit histories to isolate faulty logic.
+   - Localizes suspect files via keyword matching against the repository's top-level
+     file listing (static) or LLM reasoning (llm mode). Full AST/call-graph indexing
+     remains a future enhancement.
 3. **Patch Synthesis Agent**:
    - Generates minimal surgical diffs fixing the underlying bug without altering adjacent behaviors or APIs.
 4. **Regression & Test Synthesis Agent**:
    - Synthesizes automated reproduction tests verifying the fault before patch application and confirming pass status afterward.
 5. **Security & Audit Agent**:
    - Validates generated patches against common CWE/OWASP vulnerabilities before pull-request submission.
+
+Each agent runs in a deterministic **static** mode (no external calls, no API
+key required) or an **llm** mode that calls any OpenAI-compatible chat
+completions endpoint - OpenAI, Azure OpenAI, or a self-hosted vLLM server such
+as AMD Developer Cloud / ROCm - via the shared `LLMClient` abstraction
+(`AI_MODE`, `AI_BASE_URL`, `AI_MODEL`, `AI_API_KEY`). A single failing agent
+is caught and converted into an error result rather than aborting the run.
 
 ---
 
