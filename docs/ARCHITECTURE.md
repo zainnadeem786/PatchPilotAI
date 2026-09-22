@@ -113,14 +113,18 @@ HTTP Request (GET /api/health)
 - **ORM**: SQLAlchemy 2.0 with `declarative_base` in `app/db/base.py`.
 - **Session Management**: Sessionmaker configured with `pool_pre_ping=True` in `app/db/session.py` to prevent stale connection drops.
 - **Alembic Versioning**:
-  - All schema mutations must be tracked via versioned migration files in `backend/alembic/versions/`.
-  - Migrations read `target_metadata` directly from `app.db.base.Base.metadata`.
+  - All schema mutations are tracked via versioned migration files in `backend/alembic/versions/`.
+  - Migrations read `target_metadata` directly from `app.models.Base.metadata`.
   - The connection URL in `alembic.ini` is dynamically overridden by `app.core.config.settings.DATABASE_URL` in `alembic/env.py`.
-  - Phase 1 initializes this infrastructure without pre-committing business schemas (which will be added in Phase 3).
+  - **Phase 3 Schema**:
+    - `repositories`: Persists verified GitHub metadata (`id`, `github_id`, `owner`, `name`, `full_name`, `description`, `default_branch`, `private`, `html_url`, `language`, `open_issues_count`, timestamps).
+    - `issues`: Persists real GitHub issues metadata (`id`, `repository_id`, `github_issue_id`, `number`, `title`, `body`, `state`, `html_url`, `author`, timestamps).
+    - Foreign key constraints with `ON DELETE CASCADE` ensure child issues are cleaned up automatically upon repository removal.
+    - Zero AI-inferred fields are stored in the relational core (reserving AI fields for subsequent phases).
 
 ---
 
-## 5. Future Agent Architecture (Phase 6 Design Blueprint)
+## 5. Future Agent Architecture (Phase 4 & 6 Design Blueprint)
 
 The `backend/app/agents/` directory is reserved for autonomous multi-agent pipelines:
 
@@ -137,12 +141,23 @@ The `backend/app/agents/` directory is reserved for autonomous multi-agent pipel
 
 ---
 
-## 6. GitHub Integration Boundary (Phase 5)
+## 6. GitHub Integration Architecture (Phase 3 Implemented)
 
-- External communication with GitHub will be isolated in `backend/app/services/github/`.
-- **OAuth & Permissions**: Secure server-to-server GitHub App authentication using private keys and fine-grained installation tokens.
-- **Frontend Isolation**: No GitHub personal access tokens, client secrets, or OAuth credentials are ever exposed to or stored in the frontend client.
-- **Webhooks**: Signed HMAC SHA-256 payload verification on inbound webhook events (`/api/v1/webhooks/github`).
+- External communication with GitHub is encapsulated in `backend/app/services/github_service.py` via an asynchronous `httpx.AsyncClient`.
+- **SSRF & Traversal Protection**:
+  - `validate_repo_identifier` strictly validates repo owner and name using regex `^[a-zA-Z0-9_.-]+$`.
+  - Directory traversal (`..`), path slashes, loopback addresses (`127.0.0.1`), private IP patterns, and reserved network hosts (`localhost`, `internal`, `loopback`) are rejected with `ValueError`.
+- **Typed Error Hierarchy**:
+  - `GitHubNotFoundError` (404)
+  - `GitHubRateLimitError` (403 / 429)
+  - `GitHubAuthError` (401)
+  - `GitHubConfigurationError` (503 Service Unavailable when credentials are missing)
+  - `GitHubAPIError` (502 Bad Gateway / Network Failures)
+- **Timeout Enforcement**: Explicit 10-second request timeouts (`httpx.Timeout(10.0)`).
+- **OAuth & Credentials**:
+  - `GET /api/v1/github/auth/start` initiates user authorization flow.
+  - `GET /api/v1/github/auth/callback` handles OAuth code-for-token exchange.
+  - Credentials remain strictly server-side; tokens are never exposed to the frontend client.
 
 ---
 
