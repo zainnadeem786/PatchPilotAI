@@ -10,14 +10,15 @@
 
 ### Current Implementation Status
 
-This repository contains the verified implementation of **Phase 1, Phase 2, and Phase 3**:
+This repository contains the verified implementation of **Phase 1, Phase 2, Phase 3, and Phase 4**:
 
 * **Phase 1 — Foundation & Architecture**: Complete backend gateway, frontend shell, isolated local virtual environments, and baseline testing.
 * **Phase 2 — Professional UI/UX**: Dual-theme high-density developer interface (warm cream light mode & technical slate dark mode), bespoke vector branding, and 10 core application workspaces.
 * **Phase 3 — Backend & GitHub Integration**: Relational persistence in PostgreSQL 16, Alembic migrations, GitHub REST integration with strict SSRF defense, automated Issue vs. Pull Request count separation, and live API synchronization.
+* **Phase 4 — AI Agent Engine**: Five-stage multi-agent pipeline (Orchestrator, Repository Intelligence, Patch Synthesis, Regression Test Synthesis, Security Audit) running in a deterministic static mode or against any OpenAI-compatible LLM endpoint, wired to the existing issue/repository data via `POST /api/v1/issues/{issue_id}/analyze`.
 
 > [!IMPORTANT]
-> **What Is Implemented Now vs. What Is Coming in Phase 4+**
+> **What Is Implemented Now vs. What Is Coming Next**
 >
 > **Implemented in Phase 3**:
 > * GitHub repository metadata retrieval and registration.
@@ -30,12 +31,17 @@ This repository contains the verified implementation of **Phase 1, Phase 2, and 
 > * Live data rendering in frontend `/repositories` and `/issues` views with offline fallback.
 > * Hermetic automated test suite (28 tests passing).
 >
-> **NOT Implemented Yet (Reserved for Phase 4 & Phase 5/6)**:
-> * Autonomous multi-agent execution loops.
-> * AI-driven root cause analysis and diagnosis.
-> * LLM patch generation or automatic code synthesis.
+> **Implemented in Phase 4**:
+> * `BaseAgent` contract, shared `AgentContext`/`AgentResult`/`EngineResult` types, and the `AgentPipeline` runner (`backend/app/agents/`).
+> * Orchestrator, Repository Intelligence, Patch Synthesis, Regression Test Synthesis, and Security Audit agents - each with a deterministic static mode and an LLM mode.
+> * `LLMClient` abstraction calling any OpenAI-compatible endpoint (`AI_BASE_URL`/`AI_MODEL`/`AI_API_KEY`), including self-hosted vLLM servers such as AMD Developer Cloud / ROCm.
+> * `POST /api/v1/issues/{issue_id}/analyze` endpoint running the full pipeline against a tracked issue.
+>
+> **NOT Implemented Yet (Reserved for later phases)**:
+> * Distributed async worker pool (Celery/ARQ) executing the pipeline off the request/response cycle.
+> * Full AST/call-graph indexing for root-cause localization (current localization is keyword-based or LLM-based).
+> * Automatic PR creation from synthesized patches.
 > * Autonomous test execution and sandboxing.
-> * Automated static security AST scanning.
 > * Automated release gate approval intelligence.
 
 ---
@@ -260,6 +266,7 @@ docker ps
 | `GET` | `/api/v1/repositories/{id}/contents` | Browse files and directories in the repository tree via GitHub API. |
 | `GET` | `/api/v1/issues` | List all tracked issues across repositories (supports `repository_id` and `state` filters). |
 | `GET` | `/api/v1/issues/{id}` | Retrieve specific issue details by primary key ID. |
+| `POST` | `/api/v1/issues/{id}/analyze` | Run the Phase 4 AI Agent Engine pipeline against a tracked issue and return aggregated agent findings. |
 | `GET` | `/api/v1/github/auth/start` | Generate GitHub OAuth authorization URL with state parameter. |
 | `GET` | `/api/v1/github/auth/callback` | Exchange temporary GitHub OAuth code for access token. |
 
@@ -276,12 +283,19 @@ docker ps
 
 ---
 
-## 🔮 Roadmap: Upcoming Phase 4 (AI Agent Engine)
+## 🔮 Roadmap: Phase 4 (AI Agent Engine) — Implemented
 
-Phase 3 establishes the stable data, API, and persistence foundation. **Phase 4** will introduce the autonomous engineering intelligence:
+Phase 3 established the stable data, API, and persistence foundation. **Phase 4** introduces the autonomous engineering intelligence, implemented in `backend/app/agents/`:
 
-1. **Orchestrator Agent**: Managing the issue lifecycle through diagnosis, patch synthesis, test execution, and release verification.
-2. **Repository Intelligence Agent**: AST indexing, call-graph analysis, and root cause localization.
-3. **Patch Synthesis Agent**: Generating surgical unified diffs solving detected faults.
+1. **Orchestrator Agent**: Triages the issue lifecycle (category, priority, planned stages) ahead of diagnosis, patch synthesis, test synthesis, and audit.
+2. **Repository Intelligence Agent**: Keyword-based (static) or LLM-based root cause localization against the repository's file tree. Full AST/call-graph indexing remains future work.
+3. **Patch Synthesis Agent**: Generating surgical unified diffs solving detected faults (LLM mode) or a remediation outline (static mode).
 4. **Regression Test Synthesis Agent**: Automatically synthesizing tests that reproduce the failure before the patch and pass after application.
-5. **Security Audit Agent**: Evaluating generated patches against CWE/OWASP vulnerability patterns.
+5. **Security Audit Agent**: Evaluating the issue and any proposed patch against CWE/OWASP vulnerability patterns.
+
+Trigger the pipeline via `POST /api/v1/issues/{id}/analyze`. See `backend/app/agents/README.md` for the full design.
+
+### Next Up
+* Distributed async worker pool (Celery/ARQ) to run the pipeline off the request/response cycle.
+* Automatic pull-request creation from synthesized patches.
+* Sandboxed autonomous test execution and release-gate approval intelligence.

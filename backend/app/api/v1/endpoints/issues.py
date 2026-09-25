@@ -6,7 +6,9 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.schemas.issue import IssueResponse
+from app.schemas.agent import EngineResultResponse
 from app.services.issue_service import issue_service
+from app.services.agent_engine_service import agent_engine_service, AgentEngineNotFoundError
 
 router = APIRouter()
 
@@ -50,3 +52,27 @@ def get_issue(
             detail=f"Issue with ID {issue_id} was not found.",
         )
     return issue
+
+
+@router.post(
+    "/{issue_id}/analyze",
+    response_model=EngineResultResponse,
+    summary="Run the AI Agent Engine against an issue",
+    description=(
+        "Executes the Phase 4 multi-agent pipeline (triage, repository intelligence, "
+        "patch synthesis, regression test synthesis, security audit) for a tracked "
+        "issue and returns the aggregated findings. Runs in deterministic static mode "
+        "unless AI_MODE=llm is configured."
+    ),
+)
+async def analyze_issue(
+    issue_id: int,
+    db: Session = Depends(get_db),
+):
+    try:
+        return await agent_engine_service.analyze_issue(db, issue_id)
+    except AgentEngineNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        )

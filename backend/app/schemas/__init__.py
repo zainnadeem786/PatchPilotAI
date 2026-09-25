@@ -8,6 +8,11 @@ from app.schemas.github import (
     GitHubOAuthStartResponse,
     GitHubOAuthCallbackResponse,
 )
+from app.schemas.agent import (
+    AgentFindingResponse,
+    AgentResultResponse,
+    EngineResultResponse,
+)
 
 __all__ = [
     "HealthResponse",
@@ -17,4 +22,7 @@ __all__ = [
     "GitHubContentItem",
     "GitHubOAuthStartResponse",
     "GitHubOAuthCallbackResponse",
+    "AgentFindingResponse",
+    "AgentResultResponse",
+    "EngineResultResponse",
 ]

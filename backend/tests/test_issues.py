@@ -213,3 +213,44 @@ def test_direct_sync_excludes_pull_requests(db_session):
     assert len(db_issues) == 1
     assert db_issues[0].number == 21
 
+
+def test_analyze_issue_runs_agent_pipeline(client: TestClient, monkeypatch):
+    """Verify POST /issues/{id}/analyze runs the full Phase 4 pipeline in static mode."""
+    async def mock_get_repo(owner, name, token=None):
+        return SAMPLE_GITHUB_REPO
+
+    async def mock_list_issues(owner, name, state="open", token=None):
+        return SAMPLE_GITHUB_ISSUES
+
+    async def mock_get_contents(owner, name, path="", token=None):
+        return [{"path": "app/routing.py", "type": "file", "size": 120}]
+
+    monkeypatch.setattr(github_service, "get_repository", mock_get_repo)
+    monkeypatch.setattr(github_service, "list_repository_issues", mock_list_issues)
+    monkeypatch.setattr(github_service, "get_repository_contents", mock_get_contents)
+
+    client.post("/api/v1/repositories", json={"owner": "octocat", "name": "Hello-World"})
+    issue_id = client.get("/api/v1/issues").json()[0]["id"]
+
+    response = client.post(f"/api/v1/issues/{issue_id}/analyze")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["issue_id"] == issue_id
+    agent_names = {r["agent_name"] for r in data["results"]}
+    assert agent_names == {
+        "orchestrator",
+        "repository_intelligence",
+        "patch_synthesis",
+        "regression_test_synthesis",
+        "security_audit",
+    }
+    assert all(r["mode"] == "static" for r in data["results"])
+
+
+def test_analyze_issue_not_found(client: TestClient):
+    """Verify 404 is returned when analyzing a nonexistent issue ID."""
+    response = client.post("/api/v1/issues/99999/analyze")
+    assert response.status_code == 404
+    assert "not found" in response.json()["detail"].lower()
+

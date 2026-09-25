@@ -54,13 +54,26 @@ class Settings(BaseSettings):
     GITHUB_REDIRECT_URI: str = "http://localhost:3000/api/github/callback"
     GITHUB_API_BASE_URL: str = "https://api.github.com"
 
-    # Future AI API Key placeholder (Inactive in Phase 3)
+    # Phase 4 — AI Agent Engine
+    # AI_MODE "static" runs deterministic rule-based analysis with no external
+    # calls. AI_MODE "llm" calls any OpenAI-compatible chat completions
+    # endpoint - OpenAI itself, Azure OpenAI, or a self-hosted vLLM server
+    # (e.g. AMD Developer Cloud / ROCm) - via AI_BASE_URL and AI_MODEL.
+    AI_MODE: str = "static"
     AI_API_KEY: str = ""
+    AI_BASE_URL: str = "https://api.openai.com/v1"
+    AI_MODEL: str = "gpt-4o-mini"
+    AI_REQUEST_TIMEOUT_SECONDS: float = 30.0
 
     @property
     def github_configured(self) -> bool:
         """Check if GitHub OAuth credentials are configured."""
         return bool(self.GITHUB_CLIENT_ID and self.GITHUB_CLIENT_SECRET)
+
+    @property
+    def ai_llm_configured(self) -> bool:
+        """Check if the agent engine is configured to call a live LLM endpoint."""
+        return self.AI_MODE.lower() == "llm" and bool(self.AI_BASE_URL)
 
 
 settings = Settings()
