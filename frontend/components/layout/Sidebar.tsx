@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { PatchPilotLogo } from "@/components/brand/PatchPilotLogo";
@@ -17,29 +17,158 @@ import {
   CloseIcon,
   ShieldIcon,
 } from "@/components/icons";
+import { api } from "@/lib/api";
+
+// ── Sidebar statistics ────────────────────────────────────────────────────────
+//
+// Real data sources:
+//   repositoryCount  — GET /api/v1/repositories  (live backend count)
+//   issueCount       — GET /api/v1/issues          (live backend count)
+//   agentCount       — architectural constant: exactly 5 agents in the Phase 4
+//                      pipeline (Orchestrator, RepositoryIntelligence,
+//                      PatchSynthesis, RegressionTestSynthesis, SecurityAudit)
+//
+// Unimplemented / no persistent data source yet:
+//   patchCount       — patches are transient per-analysis; no Patch model/table
+//   testCount        — test code is transient per-analysis; no Test model/table
+//   securityCount    — security findings are transient per-analysis; not persisted
+//   releaseStatus    — no release model or release-readiness state exists yet
+//
+// For unimplemented items we display "—" instead of a fake number so the UI
+// is always truthful about the current application state.
+
+/** Sentinel value rendered when no real data source exists yet. */
+const UNAVAILABLE = "—";
+
+interface SidebarStats {
+  repositoryCount: number | null; // null = still loading or failed
+  issueCount: number | null;
+  agentCount: number | null;      // derived from canonical /api/v1/agents registry
+}
+
+/**
+ * Fetches repository count, issue count, and agent count from the real backend
+ * API once on mount.  Returns null for a stat if the request is still in
+ * flight or failed.  Never falls back to mock values.
+ */
+function useSidebarStats(): SidebarStats {
+  const [repositoryCount, setRepositoryCount] = useState<number | null>(null);
+  const [issueCount, setIssueCount] = useState<number | null>(null);
+  const [agentCount, setAgentCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchStats() {
+      // Fetch all three in parallel; each failure is isolated.
+      const [repoResult, issueResult, agentResult] = await Promise.allSettled([
+        api.getRepositories(),
+        api.getIssues(),
+        api.getAgents(),
+      ]);
+
+      if (cancelled) return;
+
+      if (repoResult.status === "fulfilled") {
+        setRepositoryCount(repoResult.value.length);
+      }
+
+      if (issueResult.status === "fulfilled") {
+        setIssueCount(issueResult.value.length);
+      }
+
+      if (agentResult.status === "fulfilled") {
+        setAgentCount(agentResult.value.length);
+      }
+    }
+
+    fetchStats();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return { repositoryCount, issueCount, agentCount };
+}
+
+// ── Navigation item type ──────────────────────────────────────────────────────
 
 interface NavItem {
   name: string;
   href: string;
   icon: React.FC<{ className?: string }>;
-  badge?: string | number;
+  /** Rendered badge string. null = omit badge entirely. */
+  badge: string | null;
 }
 
-const MAIN_NAV: NavItem[] = [
-  { name: "Overview", href: "/", icon: ShieldIcon },
-  { name: "Repositories", href: "/repositories", icon: RepoIcon, badge: 4 },
-  { name: "Issues", href: "/issues", icon: IssueIcon, badge: 12 },
-  { name: "Agents", href: "/agents", icon: AgentIcon, badge: 7 },
-  { name: "Patches", href: "/patches", icon: PatchIcon, badge: 1 },
-  { name: "Tests", href: "/tests", icon: TestIcon, badge: "28" },
-  { name: "Security", href: "/security", icon: SecurityIcon, badge: 3 },
-  { name: "Releases", href: "/releases", icon: ReleaseIcon, badge: "Ready" },
-];
+/** Builds the main nav list with live badge values injected. */
+function buildMainNav(stats: SidebarStats): NavItem[] {
+  const { repositoryCount, issueCount, agentCount } = stats;
+
+  return [
+    {
+      name: "Overview",
+      href: "/",
+      icon: ShieldIcon,
+      badge: null,
+    },
+    {
+      name: "Repositories",
+      href: "/repositories",
+      icon: RepoIcon,
+      // Show count once loaded; show "…" while loading (null); never fake a number.
+      badge: repositoryCount === null ? "…" : String(repositoryCount),
+    },
+    {
+      name: "Issues",
+      href: "/issues",
+      icon: IssueIcon,
+      badge: issueCount === null ? "…" : String(issueCount),
+    },
+    {
+      name: "Agents",
+      href: "/agents",
+      icon: AgentIcon,
+      // Derived from GET /api/v1/agents — canonical backend registry.
+      badge: agentCount === null ? "…" : String(agentCount),
+    },
+    {
+      name: "Patches",
+      href: "/patches",
+      icon: PatchIcon,
+      // No persisted patch model; patches are transient per-analysis results.
+      badge: UNAVAILABLE,
+    },
+    {
+      name: "Tests",
+      href: "/tests",
+      icon: TestIcon,
+      // No persisted test model; test code is transient per-analysis results.
+      badge: UNAVAILABLE,
+    },
+    {
+      name: "Security",
+      href: "/security",
+      icon: SecurityIcon,
+      // No global security findings persistence; findings are per-analysis only.
+      badge: UNAVAILABLE,
+    },
+    {
+      name: "Releases",
+      href: "/releases",
+      icon: ReleaseIcon,
+      // No release model or release-readiness state implemented yet.
+      badge: UNAVAILABLE,
+    },
+  ];
+}
 
 const SUPPORTING_NAV: NavItem[] = [
-  { name: "Activity", href: "/activity", icon: ActivityIcon },
-  { name: "Settings", href: "/settings", icon: SettingsIcon },
+  { name: "Activity", href: "/activity", icon: ActivityIcon, badge: null },
+  { name: "Settings", href: "/settings", icon: SettingsIcon, badge: null },
 ];
+
+// ── Component ─────────────────────────────────────────────────────────────────
 
 export interface SidebarProps {
   isOpen: boolean;
@@ -48,6 +177,8 @@ export interface SidebarProps {
 
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
   const pathname = usePathname();
+  const stats = useSidebarStats();
+  const mainNav = buildMainNav(stats);
 
   const isLinkActive = (href: string) => {
     if (href === "/") return pathname === "/";
@@ -95,7 +226,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
               Platform Workflows
             </div>
             <nav className="space-y-0.5">
-              {MAIN_NAV.map((item) => {
+              {mainNav.map((item) => {
                 const active = isLinkActive(item.href);
                 const Icon = item.icon;
                 return (
@@ -119,11 +250,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
                       />
                       <span>{item.name}</span>
                     </div>
-                    {item.badge !== undefined && (
+                    {item.badge !== null && (
                       <span
                         className={`px-1.5 py-0.2 rounded text-[10px] font-mono ${
                           active
                             ? "bg-indigo-100 dark:bg-indigo-500/25 text-indigo-800 dark:text-indigo-200 font-semibold"
+                            : item.badge === UNAVAILABLE
+                            ? "bg-cream-200 dark:bg-slate-800 text-charcoal-400 dark:text-slate-600"
                             : "bg-cream-200 dark:bg-slate-800 text-charcoal-500 dark:text-slate-400"
                         }`}
                       >

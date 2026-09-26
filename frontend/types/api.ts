@@ -46,3 +46,48 @@ export interface BackendContentItem {
   sha?: string | null;
   download_url?: string | null;
 }
+
+// ── Phase 4 / Phase 5 Agent Engine response types ────────────────────────────
+
+export interface AgentFindingResponse {
+  title: string;
+  detail: string;
+  severity: string;
+  category?: string | null;
+  file_path?: string | null;
+}
+
+export interface AgentResultResponse {
+  agent_name: string;
+  /** "success" | "error" */
+  status: string;
+  /** "static" | "llm" */
+  mode: string;
+  summary: string;
+  findings: AgentFindingResponse[];
+  /**
+   * Typed data bag. ReleaseAgent adds:
+   *   release_ready: boolean
+   *   status: "human_review_required" | "blocked"
+   *   blocking_reasons: string[]
+   *   warnings: string[]
+   */
+  data: Record<string, unknown>;
+  error?: string | null;
+}
+
+export interface EngineResultResponse {
+  repository_id: number;
+  issue_id?: number | null;
+  results: AgentResultResponse[];
+  roadmap: string[];
+}
+
+// ── Agent registry (GET /api/v1/agents) ──────────────────────────────────────
+
+export interface AgentRegistryEntry {
+  name: string;
+  display_name: string;
+  role: string;
+  description: string;
+}

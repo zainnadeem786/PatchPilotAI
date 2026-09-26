@@ -244,6 +244,7 @@ def test_analyze_issue_runs_agent_pipeline(client: TestClient, monkeypatch):
         "patch_synthesis",
         "regression_test_synthesis",
         "security_audit",
+        "release",
     }
     assert all(r["mode"] == "static" for r in data["results"])
 
@@ -253,4 +254,120 @@ def test_analyze_issue_not_found(client: TestClient):
     response = client.post("/api/v1/issues/99999/analyze")
     assert response.status_code == 404
     assert "not found" in response.json()["detail"].lower()
+
+
+
+def test_analyze_issue_partial_agent_failure(client: TestClient, monkeypatch):
+    """Phase 5: verify that a single failing agent does not abort the pipeline.
+
+    When one agent raises an unhandled exception the pipeline should still
+    return HTTP 200 with all five agent result slots present; the failing agent
+    slot should carry status 'error' while the other four remain 'success'.
+    """
+    from app.agents.security_audit_agent import SecurityAuditAgent
+    from app.agents.types import AgentContext, AgentResult
+
+    async def mock_get_repo(owner, name, token=None):
+        return SAMPLE_GITHUB_REPO
+
+    async def mock_list_issues(owner, name, state="open", token=None):
+        return SAMPLE_GITHUB_ISSUES
+
+    async def mock_get_contents(owner, name, path="", token=None):
+        return []
+
+    async def mock_security_run(self, context: AgentContext) -> AgentResult:
+        raise RuntimeError("Simulated security agent failure")
+
+    monkeypatch.setattr(github_service, "get_repository", mock_get_repo)
+    monkeypatch.setattr(github_service, "list_repository_issues", mock_list_issues)
+    monkeypatch.setattr(github_service, "get_repository_contents", mock_get_contents)
+    monkeypatch.setattr(SecurityAuditAgent, "run", mock_security_run)
+
+    client.post("/api/v1/repositories", json={"owner": "octocat", "name": "Hello-World"})
+    issue_id = client.get("/api/v1/issues").json()[0]["id"]
+
+    response = client.post(f"/api/v1/issues/{issue_id}/analyze")
+
+    # Pipeline must NOT return a 500; partial failure is handled gracefully.
+    assert response.status_code == 200
+    data = response.json()
+    assert data["issue_id"] == issue_id
+
+    results_by_name = {r["agent_name"]: r for r in data["results"]}
+
+    # All six agents must still appear in the result set.
+    assert set(results_by_name.keys()) == {
+        "orchestrator",
+        "repository_intelligence",
+        "patch_synthesis",
+        "regression_test_synthesis",
+        "security_audit",
+        "release",
+    }
+
+    # Four non-security agents succeeded.
+    assert results_by_name["orchestrator"]["status"] == "success"
+    assert results_by_name["repository_intelligence"]["status"] == "success"
+    assert results_by_name["patch_synthesis"]["status"] == "success"
+    assert results_by_name["regression_test_synthesis"]["status"] == "success"
+
+    # Security Audit must be marked as error and include an error message.
+    security_result = results_by_name["security_audit"]
+    assert security_result["status"] == "error"
+    assert security_result["error"] is not None
+    assert len(security_result["error"]) > 0
+
+    # ReleaseAgent still runs after the security failure and reports it as a blocker.
+    release_result = results_by_name["release"]
+    assert release_result["status"] == "success"
+    assert release_result["data"]["release_ready"] is False
+    assert any("security_audit" in r for r in release_result["data"]["blocking_reasons"])
+
+
+def test_analyze_issue_response_schema(client: TestClient, monkeypatch):
+    """Phase 5: verify EngineResultResponse schema shape for frontend type safety."""
+    async def mock_get_repo(owner, name, token=None):
+        return SAMPLE_GITHUB_REPO
+
+    async def mock_list_issues(owner, name, state="open", token=None):
+        return SAMPLE_GITHUB_ISSUES
+
+    async def mock_get_contents(owner, name, path="", token=None):
+        return []
+
+    monkeypatch.setattr(github_service, "get_repository", mock_get_repo)
+    monkeypatch.setattr(github_service, "list_repository_issues", mock_list_issues)
+    monkeypatch.setattr(github_service, "get_repository_contents", mock_get_contents)
+
+    client.post("/api/v1/repositories", json={"owner": "octocat", "name": "Hello-World"})
+    issue_id = client.get("/api/v1/issues").json()[0]["id"]
+
+    response = client.post(f"/api/v1/issues/{issue_id}/analyze")
+    assert response.status_code == 200
+    data = response.json()
+
+    # Top-level shape
+    assert "repository_id" in data
+    assert "issue_id" in data
+    assert "results" in data
+    assert "roadmap" in data
+    assert isinstance(data["results"], list)
+    assert isinstance(data["roadmap"], list)
+
+    # Each AgentResultResponse shape
+    for result in data["results"]:
+        assert "agent_name" in result
+        assert "status" in result
+        assert "mode" in result
+        assert "summary" in result
+        assert "findings" in result
+        assert "data" in result
+        assert isinstance(result["findings"], list)
+
+        # Each AgentFindingResponse shape
+        for finding in result["findings"]:
+            assert "title" in finding
+            assert "detail" in finding
+            assert "severity" in finding
 
