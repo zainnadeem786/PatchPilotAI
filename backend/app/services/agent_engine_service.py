@@ -1,7 +1,9 @@
 """Service orchestrating AI Agent Engine pipeline runs against tracked repositories and issues."""
 
+import base64
 import logging
-from typing import List, Optional
+import re
+from typing import Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from app.models.issue import Issue
@@ -18,6 +20,7 @@ from app.agents.types import (
 )
 from app.agents.llm_client import llm_client
 from app.agents.pipeline import AgentPipeline
+from app.services.analysis_persistence_service import persist_engine_result
 from app.agents.orchestrator_agent import OrchestratorAgent
 from app.agents.repository_intelligence_agent import RepositoryIntelligenceAgent
 from app.agents.patch_synthesis_agent import PatchSynthesisAgent
@@ -27,6 +30,22 @@ from app.agents.release_agent import ReleaseAgent
 
 
 logger = logging.getLogger(__name__)
+
+# ── Phase 6 Part 3: bounded repository context — hard limits ─────────────────
+# Cap the number of files whose source is sent to the LLM, and how much of
+# each file, so a single analysis run cannot balloon token usage. Filenames
+# matching _SECRET_FILENAME_PATTERN are never fetched, regardless of extension.
+_MAX_SNIPPET_FILES = 5
+_MAX_SNIPPET_CHARS = 2000
+_SOURCE_EXTENSIONS = {
+    ".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".rs", ".java", ".rb",
+    ".php", ".c", ".cpp", ".h", ".hpp", ".cs", ".kt", ".swift",
+}
+_SECRET_FILENAME_PATTERN = re.compile(
+    r"(^|/)(\.env(\..*)?|.*\.pem|.*\.key|id_rsa\w*|.*secret.*|.*credential.*|.*password.*|"
+    r"\.npmrc|\.pypirc|.*\.pfx|.*\.p12)$",
+    re.IGNORECASE,
+)
 
 
 class AgentEngineNotFoundError(Exception):
@@ -43,7 +62,6 @@ class AgentEngineService:
 
     def _build_pipeline(self) -> AgentPipeline:
         """Construct the six-stage pipeline with the shared `LLMClient` injected into each agent."""
-        """Construct the five-stage pipeline with the shared `LLMClient` injected into each agent."""
         return AgentPipeline(
             [
                 OrchestratorAgent(llm_client),
@@ -71,7 +89,18 @@ class AgentEngineService:
 
         context = await self._build_context(repo, issue)
         pipeline = self._build_pipeline()
-        return await pipeline.run(context)
+        engine_result = await pipeline.run(context)
+
+        # Phase 6: persist this run so the Patches/Tests/Security/Releases
+        # pages have a durable data source. Persistence failures are logged
+        # and never hide the (already-computed) analysis result from the caller.
+        try:
+            persist_engine_result(db, repo.id, issue.id if issue else None, engine_result)
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to persist analysis run for issue_id=%s", issue.id if issue else None)
+
+        return engine_result
 
     async def _build_context(self, repo: Repository, issue: Optional[Issue]) -> AgentContext:
         """Assemble `AgentContext` from already-persisted repository/issue rows."""
@@ -99,11 +128,13 @@ class AgentEngineService:
             )
 
         repository_files = await self._load_repository_files(repo)
+        repository_snippets = await self._load_repository_snippets(repo, repository_files)
 
         return AgentContext(
             repository=repository_context,
             issue=issue_context,
             repository_files=repository_files,
+            repository_snippets=repository_snippets,
         )
 
     async def _load_repository_files(self, repo: Repository) -> List[RepositoryFileEntry]:
@@ -129,6 +160,44 @@ class AgentEngineService:
             for item in contents
             if isinstance(item, dict)
         ]
+
+    async def _load_repository_snippets(
+        self, repo: Repository, repository_files: List[RepositoryFileEntry]
+    ) -> Dict[str, str]:
+        """Best-effort, hard-bounded source snippets for a small subset of top-level files.
+
+        Never fetches `.env`, key/credential/secret-like files (see
+        `_SECRET_FILENAME_PATTERN`), caps the number of files fetched
+        (`_MAX_SNIPPET_FILES`) and truncates each to `_MAX_SNIPPET_CHARS`
+        characters. Best-effort: any failure just yields fewer snippets, it
+        never aborts the analysis.
+        """
+        candidates = [
+            entry
+            for entry in repository_files
+            if entry.type == "file"
+            and any(entry.path.lower().endswith(ext) for ext in _SOURCE_EXTENSIONS)
+            and not _SECRET_FILENAME_PATTERN.search(entry.path)
+        ][:_MAX_SNIPPET_FILES]
+
+        snippets: Dict[str, str] = {}
+        for entry in candidates:
+            try:
+                file_data = await github_service.get_repository_contents(repo.owner, repo.name, path=entry.path)
+            except Exception:
+                continue
+
+            if not isinstance(file_data, dict) or file_data.get("encoding") != "base64":
+                continue
+
+            try:
+                raw = base64.b64decode(file_data.get("content", "")).decode("utf-8", errors="replace")
+            except Exception:
+                continue
+
+            snippets[entry.path] = raw[:_MAX_SNIPPET_CHARS]
+
+        return snippets
 
 
 agent_engine_service = AgentEngineService()

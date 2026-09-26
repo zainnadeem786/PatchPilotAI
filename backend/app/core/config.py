@@ -65,6 +65,18 @@ class Settings(BaseSettings):
     AI_MODEL: str = "gpt-4o-mini"
     AI_REQUEST_TIMEOUT_SECONDS: float = 30.0
 
+    # Phase 6 — LLM Runtime Integration
+    # These two complete the Phase 6 "LLM_*" configuration surface without
+    # duplicating the four settings already covered above:
+    #   LLM_PROVIDER          -> new (identifies the OpenAI-compatible provider)
+    #   LLM_MODEL              == AI_MODEL
+    #   LLM_API_KEY             == AI_API_KEY
+    #   LLM_BASE_URL            == AI_BASE_URL
+    #   LLM_TIMEOUT_SECONDS     == AI_REQUEST_TIMEOUT_SECONDS
+    #   LLM_MAX_TOKENS         -> new (response length cap for every agent call)
+    LLM_PROVIDER: str = "openai"
+    LLM_MAX_TOKENS: int = 1024
+
     @property
     def github_configured(self) -> bool:
         """Check if GitHub OAuth credentials are configured."""

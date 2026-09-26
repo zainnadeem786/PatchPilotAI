@@ -1,34 +1,197 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
+import { api } from "@/lib/api";
 import {
-  MOCK_REPOSITORIES,
-  MOCK_ISSUES,
-  MOCK_RELEASE_CANDIDATE,
-  MOCK_ACTIVITY,
-} from "@/data/mockData";
+  BackendIssue,
+  AgentRegistryEntry,
+  PatchResponse,
+  RegressionTestResponse,
+  SecurityFindingResponse,
+  ReleaseReadinessResponse,
+} from "@/types/api";
 import { Badge } from "@/components/ui/Badge";
-import { SeverityBadge } from "@/components/ui/SeverityBadge";
-import { StatusDot } from "@/components/ui/StatusDot";
 import { HealthStatus } from "@/components/HealthStatus";
 import {
   RepoIcon,
   IssueIcon,
   AgentIcon,
   PatchIcon,
-  CheckIcon,
   ArrowRightIcon,
   ShieldIcon,
-  BranchIcon,
   AlertIcon,
+  CheckIcon,
+  TestIcon,
+  SecurityIcon,
 } from "@/components/icons";
 
+type Metric = number | null; // null = still loading or failed — never a fabricated number
+
+interface DashboardData {
+  repositoryCount: Metric;
+  issueCount: Metric;
+  agentCount: Metric;
+  patchCount: Metric;
+  testCount: Metric;
+  securityCount: Metric;
+  releaseCount: Metric;
+  agents: AgentRegistryEntry[];
+  recentIssues: BackendIssue[];
+  recentPatches: PatchResponse[];
+  recentTests: RegressionTestResponse[];
+  recentSecurity: SecurityFindingResponse[];
+  recentReleases: ReleaseReadinessResponse[];
+  backendReachable: boolean | null;
+}
+
+function useDashboardData(): DashboardData {
+  const [state, setState] = useState<DashboardData>({
+    repositoryCount: null,
+    issueCount: null,
+    agentCount: null,
+    patchCount: null,
+    testCount: null,
+    securityCount: null,
+    releaseCount: null,
+    agents: [],
+    recentIssues: [],
+    recentPatches: [],
+    recentTests: [],
+    recentSecurity: [],
+    recentReleases: [],
+    backendReachable: null,
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      const [repos, issues, agents, patches, tests, security, releases, health] = await Promise.allSettled([
+        api.getRepositories(),
+        api.getIssues(),
+        api.getAgents(),
+        api.getPatches(),
+        api.getRegressionTests(),
+        api.getSecurityFindings(),
+        api.getReleases(),
+        api.isBackendAvailable(),
+      ]);
+
+      if (cancelled) return;
+
+      setState({
+        repositoryCount: repos.status === "fulfilled" ? repos.value.length : null,
+        issueCount: issues.status === "fulfilled" ? issues.value.length : null,
+        agentCount: agents.status === "fulfilled" ? agents.value.length : null,
+        patchCount: patches.status === "fulfilled" ? patches.value.length : null,
+        testCount: tests.status === "fulfilled" ? tests.value.length : null,
+        securityCount: security.status === "fulfilled" ? security.value.length : null,
+        releaseCount: releases.status === "fulfilled" ? releases.value.length : null,
+        agents: agents.status === "fulfilled" ? agents.value : [],
+        recentIssues: issues.status === "fulfilled" ? issues.value.slice(0, 3) : [],
+        recentPatches: patches.status === "fulfilled" ? patches.value.slice(0, 4) : [],
+        recentTests: tests.status === "fulfilled" ? tests.value.slice(0, 4) : [],
+        recentSecurity: security.status === "fulfilled" ? security.value.slice(0, 4) : [],
+        recentReleases: releases.status === "fulfilled" ? releases.value.slice(0, 1) : [],
+        backendReachable: health.status === "fulfilled" ? health.value : false,
+      });
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return state;
+}
+
+function MetricCard({
+  label,
+  value,
+  icon,
+}: {
+  label: string;
+  value: Metric;
+  icon: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-lg border border-cream-300 dark:border-slate-800 bg-cream-100/70 dark:bg-slate-900/50 p-3.5">
+      <div className="flex items-center justify-between text-charcoal-500 dark:text-slate-400 text-xs">
+        <span className="font-mono text-[11px] uppercase">{label}</span>
+        {icon}
+      </div>
+      <div className="mt-1.5 flex items-baseline gap-2">
+        <span className="text-2xl font-bold font-mono text-charcoal-900 dark:text-slate-100">
+          {value === null ? "—" : value}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+interface ActivityRow {
+  key: string;
+  title: string;
+  timestamp: string;
+  repo: string | null;
+  kind: "patch" | "test" | "security" | "release";
+}
+
 export default function OverviewPage() {
-  const primaryIssue = MOCK_ISSUES[0]; // Issue #142
+  const data = useDashboardData();
+
+  const activity: ActivityRow[] = [
+    ...data.recentPatches.map((p) => ({
+      key: `patch-${p.id}`,
+      title: p.summary || `Patch proposed for issue #${p.issue_number ?? "?"}`,
+      timestamp: p.created_at,
+      repo: p.repository_full_name ?? null,
+      kind: "patch" as const,
+    })),
+    ...data.recentTests.map((t) => ({
+      key: `test-${t.id}`,
+      title: t.purpose || `Regression test generated for issue #${t.issue_number ?? "?"}`,
+      timestamp: t.created_at,
+      repo: t.repository_full_name ?? null,
+      kind: "test" as const,
+    })),
+    ...data.recentSecurity.map((s) => ({
+      key: `sec-${s.id}`,
+      title: s.title,
+      timestamp: s.created_at,
+      repo: s.repository_full_name ?? null,
+      kind: "security" as const,
+    })),
+    ...data.recentReleases.map((r) => ({
+      key: `rel-${r.id}`,
+      title: r.release_ready ? "Release marked ready for human review" : "Release blocked pending review",
+      timestamp: r.created_at,
+      repo: r.repository_full_name ?? null,
+      kind: "release" as const,
+    })),
+  ]
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    .slice(0, 5);
+
+  const latestRelease = data.recentReleases[0] ?? null;
 
   return (
     <div className="space-y-6">
+      {/* Backend unavailable banner — metrics below show "—" rather than fake numbers */}
+      {data.backendReachable === false && (
+        <div className="rounded-lg border border-amber-300/80 dark:border-amber-500/30 bg-amber-50/70 dark:bg-amber-950/30 p-4 flex items-start gap-2.5">
+          <AlertIcon className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+          <div>
+            <h4 className="text-xs font-semibold text-charcoal-900 dark:text-amber-200">Backend Offline</h4>
+            <p className="text-xs text-charcoal-600 dark:text-slate-300 mt-0.5">
+              Start the FastAPI backend on port 8000. Metrics show &ldquo;—&rdquo; instead of a number until the connection is restored.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Top Engineering Summary Header */}
       <div className="rounded-lg border border-cream-300 dark:border-slate-800 bg-cream-100/80 dark:bg-slate-900/60 p-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -48,10 +211,10 @@ export default function OverviewPage() {
 
           <div className="flex items-center gap-2.5 self-start sm:self-auto">
             <Link
-              href="/issues/142"
+              href="/issues"
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 rounded-md shadow-xs transition-colors duration-150 font-mono"
             >
-              <span>Investigate #142</span>
+              <span>View Issues</span>
               <ArrowRightIcon className="w-3.5 h-3.5" />
             </Link>
             <Link
@@ -63,220 +226,105 @@ export default function OverviewPage() {
           </div>
         </div>
 
-        {/* Workflow Lifecycle Sequence */}
-        <div className="mt-4 pt-4 border-t border-cream-300/80 dark:border-slate-800/80 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-1.5 text-[11px] font-mono">
-          {[
-            { step: "1. Issue", state: "done" },
-            { step: "2. AST Mapping", state: "done" },
-            { step: "3. Root Cause", state: "done" },
-            { step: "4. Coordination", state: "done" },
-            { step: "5. Patch", state: "done" },
-            { step: "6. Tests", state: "done" },
-            { step: "7. Security", state: "done" },
-            { step: "8. Sign-off", state: "active" },
-          ].map((item, idx) => (
-            <div
-              key={idx}
-              className={`py-1 px-2 rounded border text-center transition-colors duration-150 ${
-                item.state === "active"
-                  ? "border-indigo-500/60 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 font-semibold"
-                  : "border-cream-300 dark:border-slate-800/80 bg-cream-50 dark:bg-slate-950/60 text-charcoal-500 dark:text-slate-400"
-              }`}
-            >
-              {item.step}
-            </div>
-          ))}
-        </div>
+        {/* Pipeline stage strip — informational only, derived from the real agent registry */}
+        {data.agents.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-cream-300/80 dark:border-slate-800/80 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5 text-[11px] font-mono">
+            {data.agents.map((agent, idx) => (
+              <div
+                key={agent.name}
+                className="py-1 px-2 rounded border text-center border-cream-300 dark:border-slate-800/80 bg-cream-50 dark:bg-slate-950/60 text-charcoal-500 dark:text-slate-400"
+              >
+                {idx + 1}. {agent.display_name.replace(" Agent", "")}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* Compact Metrics Row */}
+      {/* Metrics Row — every number sourced from a real API call */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="rounded-lg border border-cream-300 dark:border-slate-800 bg-cream-100/70 dark:bg-slate-900/50 p-3.5">
-          <div className="flex items-center justify-between text-charcoal-500 dark:text-slate-400 text-xs">
-            <span className="font-mono text-[11px] uppercase">Repositories</span>
-            <RepoIcon className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-          </div>
-          <div className="mt-1.5 flex items-baseline gap-2">
-            <span className="text-2xl font-bold font-mono text-charcoal-900 dark:text-slate-100">4</span>
-            <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium font-mono">100% Indexed</span>
-          </div>
-        </div>
-
-        <div className="rounded-lg border border-cream-300 dark:border-slate-800 bg-cream-100/70 dark:bg-slate-900/50 p-3.5">
-          <div className="flex items-center justify-between text-charcoal-500 dark:text-slate-400 text-xs">
-            <span className="font-mono text-[11px] uppercase">Open Issues</span>
-            <IssueIcon className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-          </div>
-          <div className="mt-1.5 flex items-baseline gap-2">
-            <span className="text-2xl font-bold font-mono text-charcoal-900 dark:text-slate-100">12</span>
-            <span className="text-[11px] text-amber-600 dark:text-amber-400 font-medium font-mono">1 Patch Ready</span>
-          </div>
-        </div>
-
-        <div className="rounded-lg border border-cream-300 dark:border-slate-800 bg-cream-100/70 dark:bg-slate-900/50 p-3.5">
-          <div className="flex items-center justify-between text-charcoal-500 dark:text-slate-400 text-xs">
-            <span className="font-mono text-[11px] uppercase">Agent Fleet</span>
-            <AgentIcon className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
-          </div>
-          <div className="mt-1.5 flex items-baseline gap-2">
-            <span className="text-2xl font-bold font-mono text-charcoal-900 dark:text-slate-100">7</span>
-            <span className="text-[11px] text-sky-600 dark:text-sky-400 font-medium font-mono">Specialized</span>
-          </div>
-        </div>
-
-        <div className="rounded-lg border border-cream-300 dark:border-slate-800 bg-cream-100/70 dark:bg-slate-900/50 p-3.5">
-          <div className="flex items-center justify-between text-charcoal-500 dark:text-slate-400 text-xs">
-            <span className="font-mono text-[11px] uppercase">Release Gates</span>
-            <ShieldIcon className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-          </div>
-          <div className="mt-1.5 flex items-baseline gap-2">
-            <span className="text-2xl font-bold font-mono text-charcoal-900 dark:text-slate-100">4 / 5</span>
-            <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium font-mono">Cleared</span>
-          </div>
-        </div>
+        <MetricCard label="Repositories" value={data.repositoryCount} icon={<RepoIcon className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />} />
+        <MetricCard label="Open Issues" value={data.issueCount} icon={<IssueIcon className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />} />
+        <MetricCard label="Agents" value={data.agentCount} icon={<AgentIcon className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />} />
+        <MetricCard label="Patches" value={data.patchCount} icon={<PatchIcon className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />} />
+        <MetricCard label="Tests" value={data.testCount} icon={<TestIcon className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />} />
+        <MetricCard label="Security Findings" value={data.securityCount} icon={<SecurityIcon className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />} />
+        <MetricCard label="Releases" value={data.releaseCount} icon={<ShieldIcon className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" />} />
       </div>
 
-      {/* Active Workflows Section */}
+      {/* Recent Issues */}
       <div className="rounded-lg border border-cream-300 dark:border-slate-800 bg-cream-100/60 dark:bg-slate-900/50 p-4 space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-mono font-semibold uppercase tracking-wider text-charcoal-700 dark:text-slate-300">
-            Active Engineering Workflows
+            Recent Issues
           </h3>
-          <Link
-            href="/issues"
-            className="text-xs font-mono text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 transition-colors duration-150"
-          >
+          <Link href="/issues" className="text-xs font-mono text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 transition-colors duration-150">
             <span>View All</span>
             <ArrowRightIcon className="w-3 h-3" />
           </Link>
         </div>
 
-        {/* Primary Workflow Row */}
-        <div className="rounded-lg border border-cream-300 dark:border-slate-800 bg-cream-50 dark:bg-slate-950/70 p-4 space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div className="flex items-center gap-2.5">
-              <span className="font-mono text-xs font-bold text-indigo-600 dark:text-indigo-400">#142</span>
+        {data.recentIssues.length === 0 ? (
+          <div className="p-6 text-center text-xs font-mono text-charcoal-500 dark:text-slate-500 border border-dashed border-cream-300 dark:border-slate-800 rounded-lg">
+            No issues tracked yet. Connect a repository to sync issues.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {data.recentIssues.map((issue) => (
               <Link
-                href="/issues/142"
-                className="text-sm font-semibold text-charcoal-900 dark:text-slate-200 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors duration-150"
+                key={issue.id}
+                href={`/issues/${issue.id}`}
+                className="block rounded-lg border border-cream-300 dark:border-slate-800 bg-cream-50 dark:bg-slate-950/70 p-3 flex items-center justify-between gap-3 hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors duration-150"
               >
-                Checkout returns 500 when coupon is expired
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="font-mono text-xs font-bold text-indigo-600 dark:text-indigo-400 shrink-0">#{issue.number}</span>
+                  <span className="text-sm font-medium text-charcoal-900 dark:text-slate-200 truncate">{issue.title}</span>
+                </div>
+                <Badge variant={issue.state === "open" ? "success" : "neutral"} size="sm">{issue.state.toUpperCase()}</Badge>
               </Link>
-            </div>
-            <div className="flex items-center gap-2 self-start sm:self-auto">
-              <span className="text-xs font-mono text-charcoal-500 dark:text-slate-400">acme-store-api</span>
-              <SeverityBadge severity="high" />
-              <Badge variant="success" size="sm">
-                Patch Synthesized
-              </Badge>
-            </div>
+            ))}
           </div>
-
-          {/* Compact Agent Progress Indicators */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
-            <div className="p-2 rounded border border-cream-300 dark:border-slate-800 bg-cream-100/60 dark:bg-slate-900/60 flex items-center justify-between">
-              <span className="text-charcoal-700 dark:text-slate-300">Explorer</span>
-              <CheckIcon className="w-3.5 h-3.5 text-emerald-500" />
-            </div>
-            <div className="p-2 rounded border border-cream-300 dark:border-slate-800 bg-cream-100/60 dark:bg-slate-900/60 flex items-center justify-between">
-              <span className="text-charcoal-700 dark:text-slate-300">Debug (92%)</span>
-              <CheckIcon className="w-3.5 h-3.5 text-emerald-500" />
-            </div>
-            <div className="p-2 rounded border border-cream-300 dark:border-slate-800 bg-cream-100/60 dark:bg-slate-900/60 flex items-center justify-between">
-              <span className="text-charcoal-700 dark:text-slate-300">Security</span>
-              <CheckIcon className="w-3.5 h-3.5 text-emerald-500" />
-            </div>
-            <div className="p-2 rounded border border-amber-500/30 bg-amber-500/5 flex items-center justify-between">
-              <span className="text-amber-800 dark:text-amber-300">Validation (28/28)</span>
-              <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-ping" />
-            </div>
-          </div>
-
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-cream-300/80 dark:border-slate-900 text-xs text-charcoal-500 dark:text-slate-400">
-            <span className="truncate max-w-xl font-mono text-[11px]">
-              Root Cause: Expired coupon object passed directly into discount calculation without datetime validation.
-            </span>
-            <Link
-              href="/patches"
-              className="font-mono text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-medium shrink-0 transition-colors duration-150"
-            >
-              Inspect Diff &rarr;
-            </Link>
-          </div>
-        </div>
-
-        {/* Secondary Workflow Row */}
-        <div className="rounded-lg border border-cream-300 dark:border-slate-800 bg-cream-50/70 dark:bg-slate-950/40 p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-          <div className="flex items-center gap-2.5">
-            <span className="font-mono font-bold text-amber-600 dark:text-amber-400">#89</span>
-            <div>
-              <span className="text-charcoal-900 dark:text-slate-200 font-medium">
-                Stripe webhook replay causes duplicate ledger entries
-              </span>
-              <span className="text-charcoal-400 dark:text-slate-500 block font-mono text-[11px]">
-                payment-service &bull; branch: main
-              </span>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
-            <SeverityBadge severity="critical" />
-            <Badge variant="warning" size="sm">
-              Debug Active
-            </Badge>
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Two Columns: Release Gates & Recent Activity */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        {/* Release Readiness Column */}
+        {/* Latest Release Readiness */}
         <div className="rounded-lg border border-cream-300 dark:border-slate-800 bg-cream-100/60 dark:bg-slate-900/50 p-4 flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-xs font-mono font-semibold uppercase tracking-wider text-charcoal-700 dark:text-slate-300">
-                Release Candidate
+                Latest Release Evaluation
               </h3>
-              <Badge variant="success" size="sm">Ready for Review</Badge>
+              {latestRelease && (
+                <Badge variant={latestRelease.release_ready ? "success" : "error"} size="sm">
+                  {latestRelease.release_ready ? "Ready for Review" : "Blocked"}
+                </Badge>
+              )}
             </div>
 
-            <div className="space-y-0.5 mb-3">
-              <span className="text-xs font-mono font-semibold text-charcoal-900 dark:text-slate-200 block truncate">
-                {MOCK_RELEASE_CANDIDATE.version}
-              </span>
-              <span className="text-[11px] font-mono text-charcoal-500 dark:text-slate-400 block">
-                {MOCK_RELEASE_CANDIDATE.repo} &bull; {MOCK_RELEASE_CANDIDATE.branch}
-              </span>
-            </div>
-
-            {/* Quality Gates Checklist */}
-            <div className="space-y-1.5 pt-1">
-              {MOCK_RELEASE_CANDIDATE.gates.map((gate) => (
-                <div
-                  key={gate.id}
-                  className="flex items-center justify-between p-2 rounded border border-cream-300 dark:border-slate-800 bg-cream-50 dark:bg-slate-950/50 text-xs font-mono"
-                >
-                  <span className="text-charcoal-700 dark:text-slate-300">{gate.name}</span>
-                  {gate.status === "passed" ? (
-                    <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
-                      <CheckIcon className="w-3 h-3" />
-                      Passed
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 font-medium">
-                      <AlertIcon className="w-3 h-3" />
-                      Warning
-                    </span>
-                  )}
+            {!latestRelease ? (
+              <div className="p-5 text-center text-xs font-mono text-charcoal-500 dark:text-slate-500 border border-dashed border-cream-300 dark:border-slate-800 rounded-lg">
+                No release evaluations yet.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <span className="text-xs font-mono font-semibold text-charcoal-900 dark:text-slate-200 block truncate">
+                  {latestRelease.issue_title ? `#${latestRelease.issue_number} — ${latestRelease.issue_title}` : `Evaluation #${latestRelease.id}`}
+                </span>
+                {latestRelease.repository_full_name && (
+                  <span className="text-[11px] font-mono text-charcoal-500 dark:text-slate-400 block">{latestRelease.repository_full_name}</span>
+                )}
+                <div className="p-2 rounded border border-violet-200 dark:border-violet-500/30 bg-violet-50/60 dark:bg-violet-950/20 text-[11px] font-mono text-violet-800 dark:text-violet-300 flex items-start gap-1.5">
+                  <ShieldIcon className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  <span>Human approval required — no automatic release action will occur.</span>
                 </div>
-              ))}
-            </div>
+              </div>
+            )}
           </div>
 
           <div className="pt-3 mt-3 border-t border-cream-300/80 dark:border-slate-800">
-            <Link
-              href="/releases"
-              className="w-full inline-flex items-center justify-center gap-1.5 py-1.5 text-xs font-mono font-medium text-white bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 rounded-md transition-colors duration-150"
-            >
+            <Link href="/releases" className="w-full inline-flex items-center justify-center gap-1.5 py-1.5 text-xs font-mono font-medium text-white bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 rounded-md transition-colors duration-150">
               <span>Inspect Release Gates</span>
               <ArrowRightIcon className="w-3 h-3" />
             </Link>
@@ -289,42 +337,39 @@ export default function OverviewPage() {
             <h3 className="text-xs font-mono font-semibold uppercase tracking-wider text-charcoal-700 dark:text-slate-300">
               Recent Engineering Activity
             </h3>
-            <Link
-              href="/activity"
-              className="text-xs font-mono text-indigo-600 dark:text-indigo-400 hover:underline transition-colors duration-150"
-            >
+            <Link href="/activity" className="text-xs font-mono text-indigo-600 dark:text-indigo-400 hover:underline transition-colors duration-150">
               Full Log &rarr;
             </Link>
           </div>
 
-          <div className="space-y-2">
-            {MOCK_ACTIVITY.slice(0, 4).map((act) => (
-              <div
-                key={act.id}
-                className="flex items-start gap-2.5 p-2.5 rounded border border-cream-300 dark:border-slate-800/80 bg-cream-50 dark:bg-slate-950/50 text-xs"
-              >
-                <div className="mt-1">
-                  <StatusDot status="completed" size="sm" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium text-charcoal-900 dark:text-slate-200 truncate">
-                      {act.title}
-                    </span>
-                    <span className="font-mono text-[11px] text-charcoal-400 dark:text-slate-500 shrink-0">
-                      {act.timestamp}
-                    </span>
+          {activity.length === 0 ? (
+            <div className="p-6 text-center text-xs font-mono text-charcoal-500 dark:text-slate-500 border border-dashed border-cream-300 dark:border-slate-800 rounded-lg">
+              No activity yet. Analyze an issue to generate patches, tests, and security findings.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {activity.map((act) => (
+                <div key={act.key} className="flex items-start gap-2.5 p-2.5 rounded border border-cream-300 dark:border-slate-800/80 bg-cream-50 dark:bg-slate-950/50 text-xs">
+                  <div className="mt-1">
+                    {act.kind === "security" ? (
+                      <AlertIcon className="w-3.5 h-3.5 text-rose-500" />
+                    ) : (
+                      <CheckIcon className="w-3.5 h-3.5 text-emerald-500" />
+                    )}
                   </div>
-                  <p className="text-charcoal-500 dark:text-slate-400 text-xs truncate mt-0.5">
-                    {act.description}
-                  </p>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium text-charcoal-900 dark:text-slate-200 truncate">{act.title}</span>
+                      <span className="font-mono text-[11px] text-charcoal-400 dark:text-slate-500 shrink-0">
+                        {new Date(act.timestamp).toLocaleString()}
+                      </span>
+                    </div>
+                    {act.repo && <p className="text-charcoal-500 dark:text-slate-400 text-xs truncate mt-0.5">{act.repo}</p>}
+                  </div>
                 </div>
-                <span className="font-mono text-[10px] px-1.5 py-0.2 rounded border border-cream-300 dark:border-slate-800 bg-cream-100 dark:bg-slate-900 text-charcoal-600 dark:text-slate-400 hidden sm:inline-block shrink-0">
-                  {act.agentName}
-                </span>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
 
           {/* Phase 1 Backend Health Check widget */}
           <div className="pt-2">

@@ -21,65 +21,70 @@ import { api } from "@/lib/api";
 
 // ── Sidebar statistics ────────────────────────────────────────────────────────
 //
-// Real data sources:
-//   repositoryCount  — GET /api/v1/repositories  (live backend count)
-//   issueCount       — GET /api/v1/issues          (live backend count)
-//   agentCount       — architectural constant: exactly 5 agents in the Phase 4
-//                      pipeline (Orchestrator, RepositoryIntelligence,
-//                      PatchSynthesis, RegressionTestSynthesis, SecurityAudit)
+// Every count below comes from a real backend endpoint, fetched once on
+// mount. A stat is `null` while loading or if its request failed — the UI
+// renders "…" (loading) rather than ever fabricating a number.
 //
-// Unimplemented / no persistent data source yet:
-//   patchCount       — patches are transient per-analysis; no Patch model/table
-//   testCount        — test code is transient per-analysis; no Test model/table
-//   securityCount    — security findings are transient per-analysis; not persisted
-//   releaseStatus    — no release model or release-readiness state exists yet
-//
-// For unimplemented items we display "—" instead of a fake number so the UI
-// is always truthful about the current application state.
-
-/** Sentinel value rendered when no real data source exists yet. */
-const UNAVAILABLE = "—";
+//   repositoryCount — GET /api/v1/repositories
+//   issueCount      — GET /api/v1/issues
+//   agentCount      — GET /api/v1/agents (canonical registry)
+//   patchCount      — GET /api/v1/patches
+//   testCount       — GET /api/v1/tests
+//   securityCount   — GET /api/v1/security
+//   releaseCount    — GET /api/v1/releases
 
 interface SidebarStats {
   repositoryCount: number | null; // null = still loading or failed
   issueCount: number | null;
-  agentCount: number | null;      // derived from canonical /api/v1/agents registry
+  agentCount: number | null;
+  patchCount: number | null;
+  testCount: number | null;
+  securityCount: number | null;
+  releaseCount: number | null;
 }
 
 /**
- * Fetches repository count, issue count, and agent count from the real backend
- * API once on mount.  Returns null for a stat if the request is still in
- * flight or failed.  Never falls back to mock values.
+ * Fetches every sidebar count from the real backend API once on mount.
+ * Returns null for a stat if the request is still in flight or failed.
+ * Never falls back to mock values.
  */
 function useSidebarStats(): SidebarStats {
-  const [repositoryCount, setRepositoryCount] = useState<number | null>(null);
-  const [issueCount, setIssueCount] = useState<number | null>(null);
-  const [agentCount, setAgentCount] = useState<number | null>(null);
+  const [stats, setStats] = useState<SidebarStats>({
+    repositoryCount: null,
+    issueCount: null,
+    agentCount: null,
+    patchCount: null,
+    testCount: null,
+    securityCount: null,
+    releaseCount: null,
+  });
 
   useEffect(() => {
     let cancelled = false;
 
     async function fetchStats() {
-      // Fetch all three in parallel; each failure is isolated.
-      const [repoResult, issueResult, agentResult] = await Promise.allSettled([
-        api.getRepositories(),
-        api.getIssues(),
-        api.getAgents(),
-      ]);
+      const [repoResult, issueResult, agentResult, patchResult, testResult, securityResult, releaseResult] =
+        await Promise.allSettled([
+          api.getRepositories(),
+          api.getIssues(),
+          api.getAgents(),
+          api.getPatches(),
+          api.getRegressionTests(),
+          api.getSecurityFindings(),
+          api.getReleases(),
+        ]);
 
       if (cancelled) return;
 
-      if (repoResult.status === "fulfilled") {
-        setRepositoryCount(repoResult.value.length);
-      }
-
-      if (issueResult.status === "fulfilled") {
-        setIssueCount(issueResult.value.length);
-      }
-
-      if (agentResult.status === "fulfilled") {
-        setAgentCount(agentResult.value.length);
-      }
+      setStats({
+        repositoryCount: repoResult.status === "fulfilled" ? repoResult.value.length : null,
+        issueCount: issueResult.status === "fulfilled" ? issueResult.value.length : null,
+        agentCount: agentResult.status === "fulfilled" ? agentResult.value.length : null,
+        patchCount: patchResult.status === "fulfilled" ? patchResult.value.length : null,
+        testCount: testResult.status === "fulfilled" ? testResult.value.length : null,
+        securityCount: securityResult.status === "fulfilled" ? securityResult.value.length : null,
+        releaseCount: releaseResult.status === "fulfilled" ? releaseResult.value.length : null,
+      });
     }
 
     fetchStats();
@@ -88,7 +93,7 @@ function useSidebarStats(): SidebarStats {
     };
   }, []);
 
-  return { repositoryCount, issueCount, agentCount };
+  return stats;
 }
 
 // ── Navigation item type ──────────────────────────────────────────────────────
@@ -103,7 +108,7 @@ interface NavItem {
 
 /** Builds the main nav list with live badge values injected. */
 function buildMainNav(stats: SidebarStats): NavItem[] {
-  const { repositoryCount, issueCount, agentCount } = stats;
+  const { repositoryCount, issueCount, agentCount, patchCount, testCount, securityCount, releaseCount } = stats;
 
   return [
     {
@@ -136,29 +141,25 @@ function buildMainNav(stats: SidebarStats): NavItem[] {
       name: "Patches",
       href: "/patches",
       icon: PatchIcon,
-      // No persisted patch model; patches are transient per-analysis results.
-      badge: UNAVAILABLE,
+      badge: patchCount === null ? "…" : String(patchCount),
     },
     {
       name: "Tests",
       href: "/tests",
       icon: TestIcon,
-      // No persisted test model; test code is transient per-analysis results.
-      badge: UNAVAILABLE,
+      badge: testCount === null ? "…" : String(testCount),
     },
     {
       name: "Security",
       href: "/security",
       icon: SecurityIcon,
-      // No global security findings persistence; findings are per-analysis only.
-      badge: UNAVAILABLE,
+      badge: securityCount === null ? "…" : String(securityCount),
     },
     {
       name: "Releases",
       href: "/releases",
       icon: ReleaseIcon,
-      // No release model or release-readiness state implemented yet.
-      badge: UNAVAILABLE,
+      badge: releaseCount === null ? "…" : String(releaseCount),
     },
   ];
 }
@@ -255,8 +256,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
                         className={`px-1.5 py-0.2 rounded text-[10px] font-mono ${
                           active
                             ? "bg-indigo-100 dark:bg-indigo-500/25 text-indigo-800 dark:text-indigo-200 font-semibold"
-                            : item.badge === UNAVAILABLE
-                            ? "bg-cream-200 dark:bg-slate-800 text-charcoal-400 dark:text-slate-600"
                             : "bg-cream-200 dark:bg-slate-800 text-charcoal-500 dark:text-slate-400"
                         }`}
                       >

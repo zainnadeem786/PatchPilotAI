@@ -77,6 +77,10 @@ class AgentContext:
     repository: RepositoryContext
     issue: Optional[IssueContext] = None
     repository_files: List[RepositoryFileEntry] = field(default_factory=list)
+    # Bounded, secret-excluded source snippets for a small capped subset of
+    # top-level files - see AgentEngineService._load_repository_snippets for
+    # the hard limits (file count, per-file length, denylisted filenames).
+    repository_snippets: Dict[str, str] = field(default_factory=dict)
     previous_results: Dict[str, AgentResult] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
 

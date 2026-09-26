@@ -13,6 +13,10 @@ from app.schemas.agent import (
     AgentResultResponse,
     EngineResultResponse,
 )
+from app.schemas.patch import PatchResponse
+from app.schemas.regression_test import RegressionTestResponse
+from app.schemas.security import SecurityFindingResponse
+from app.schemas.release import ReleaseReadinessResponse
 
 __all__ = [
     "HealthResponse",
@@ -25,4 +29,8 @@ __all__ = [
     "AgentFindingResponse",
     "AgentResultResponse",
     "EngineResultResponse",
+    "PatchResponse",
+    "RegressionTestResponse",
+    "SecurityFindingResponse",
+    "ReleaseReadinessResponse",
 ]
