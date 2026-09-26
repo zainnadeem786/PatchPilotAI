@@ -25,6 +25,7 @@ from app.agents.regression_test_agent import RegressionTestSynthesisAgent
 from app.agents.security_audit_agent import SecurityAuditAgent
 from app.agents.release_agent import ReleaseAgent
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -42,6 +43,7 @@ class AgentEngineService:
 
     def _build_pipeline(self) -> AgentPipeline:
         """Construct the six-stage pipeline with the shared `LLMClient` injected into each agent."""
+        """Construct the five-stage pipeline with the shared `LLMClient` injected into each agent."""
         return AgentPipeline(
             [
                 OrchestratorAgent(llm_client),

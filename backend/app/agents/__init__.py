@@ -11,6 +11,12 @@ Canonical six-agent pipeline (in execution order):
   4. RegressionTestSynthesisAgent
   5. SecurityAuditAgent
   6. ReleaseAgent
+
+"""AI Agent Engine package (Phase 4).
+
+Exposes the shared agent contracts (`BaseAgent`, `AgentContext`, `AgentResult`),
+the `LLMClient` abstraction, the five pipeline agents, and the `AgentPipeline`
+runner that executes them in order.
 """
 
 from app.agents.types import (

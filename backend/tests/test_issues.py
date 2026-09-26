@@ -370,3 +370,4 @@ def test_analyze_issue_response_schema(client: TestClient, monkeypatch):
             assert "title" in finding
             assert "detail" in finding
             assert "severity" in finding
+
