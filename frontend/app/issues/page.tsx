@@ -231,16 +231,17 @@ export default function IssuesPage() {
       {status !== "loading" && filteredIssues.length > 0 && (
         <div className="space-y-2">
           {filteredIssues.map((issue) => (
-            <div
+            <Link
               key={issue.id}
-              className="p-3.5 rounded-lg border border-cream-300 dark:border-slate-800 bg-cream-100/90 dark:bg-slate-900/60 hover:border-cream-400 dark:hover:border-slate-700 transition-colors duration-150 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs"
+              href={issue.isLive ? `/issues/${issue.id}` : "#"}
+              className="p-3.5 rounded-lg border border-cream-300 dark:border-slate-800 bg-cream-100/90 dark:bg-slate-900/60 hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors duration-150 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs group block"
             >
               <div className="space-y-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-mono text-xs font-bold text-indigo-600 dark:text-indigo-400">
                     #{issue.number}
                   </span>
-                  <span className="text-xs font-semibold text-charcoal-900 dark:text-slate-100">
+                  <span className="text-xs font-semibold text-charcoal-900 dark:text-slate-100 group-hover:text-indigo-700 dark:group-hover:text-indigo-300 transition-colors">
                     {issue.title}
                   </span>
                   {issue.isLive ? (
@@ -274,8 +275,13 @@ export default function IssuesPage() {
                 >
                   {issue.state.toUpperCase()}
                 </Badge>
+                {issue.isLive && (
+                  <span className="text-[11px] font-mono text-indigo-500 dark:text-indigo-400 group-hover:text-indigo-700 dark:group-hover:text-indigo-300 transition-colors">
+                    Analyze →
+                  </span>
+                )}
               </div>
-            </div>
+            </Link>
           ))}
         </div>
       )}

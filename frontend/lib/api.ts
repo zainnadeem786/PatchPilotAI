@@ -5,6 +5,8 @@ import {
   BackendRepository,
   BackendIssue,
   BackendContentItem,
+  EngineResultResponse,
+  AgentRegistryEntry,
 } from "@/types/api";
 
 const API_BASE_URL =
@@ -186,6 +188,51 @@ export class ApiClient {
 
     if (!response.ok) {
       throw new Error(`Failed to load contents (HTTP ${response.status})`);
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Retrieve the canonical ordered list of registered pipeline agents.
+   * Calls GET /api/v1/agents
+   * This is the single source of truth for agent count and metadata.
+   */
+  async getAgents(): Promise<AgentRegistryEntry[]> {
+    const url = `${this.baseUrl}/api/v1/agents`;
+    const response = await fetch(url, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to load agent registry (HTTP ${response.status})`);
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Run the Phase 4/5 AI Agent Engine pipeline for a tracked issue.
+   * Calls POST /api/v1/issues/{id}/analyze
+   */
+  async analyzeIssue(id: number | string): Promise<EngineResultResponse> {
+    const url = `${this.baseUrl}/api/v1/issues/${id}/analyze`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { Accept: "application/json" },
+    });
+
+    if (!response.ok) {
+      let detail = `HTTP ${response.status}`;
+      try {
+        const errorJson = await response.json();
+        detail = errorJson.detail || detail;
+      } catch {
+        detail = (await response.text()) || detail;
+      }
+      throw new Error(detail);
     }
 
     return response.json();

@@ -23,6 +23,7 @@ from app.agents.repository_intelligence_agent import RepositoryIntelligenceAgent
 from app.agents.patch_synthesis_agent import PatchSynthesisAgent
 from app.agents.regression_test_agent import RegressionTestSynthesisAgent
 from app.agents.security_audit_agent import SecurityAuditAgent
+from app.agents.release_agent import ReleaseAgent
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ class AgentEngineService:
     """
 
     def _build_pipeline(self) -> AgentPipeline:
-        """Construct the five-stage pipeline with the shared `LLMClient` injected into each agent."""
+        """Construct the six-stage pipeline with the shared `LLMClient` injected into each agent."""
         return AgentPipeline(
             [
                 OrchestratorAgent(llm_client),
@@ -48,6 +49,7 @@ class AgentEngineService:
                 PatchSynthesisAgent(llm_client),
                 RegressionTestSynthesisAgent(llm_client),
                 SecurityAuditAgent(llm_client),
+                ReleaseAgent(llm_client),
             ]
         )
 

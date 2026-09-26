@@ -1,7 +1,7 @@
 """Top-level API router configuration."""
 
 from fastapi import APIRouter
-from app.api.v1.endpoints import health, repositories, issues, github
+from app.api.v1.endpoints import health, repositories, issues, github, agents
 
 api_router = APIRouter()
 
@@ -14,5 +14,6 @@ v1_router.include_router(health.router, tags=["Health"])
 v1_router.include_router(repositories.router, prefix="/repositories", tags=["Repositories"])
 v1_router.include_router(issues.router, prefix="/issues", tags=["Issues"])
 v1_router.include_router(github.router, prefix="/github", tags=["GitHub"])
+v1_router.include_router(agents.router, prefix="/agents", tags=["Agents"])
 
 api_router.include_router(v1_router)
