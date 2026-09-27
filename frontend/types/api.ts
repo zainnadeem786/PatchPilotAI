@@ -81,6 +81,7 @@ export interface EngineResultResponse {
   issue_id?: number | null;
   results: AgentResultResponse[];
   roadmap: string[];
+  validation?: ValidationRunResponse | null;
 }
 
 // ── Agent registry (GET /api/v1/agents) ──────────────────────────────────────
@@ -90,4 +91,105 @@ export interface AgentRegistryEntry {
   display_name: string;
   role: string;
   description: string;
+}
+
+// ── Phase 6 — Persisted agent-artifact response types ───────────────────────
+// One row per analysis run, written by the backend's analysis_persistence_service
+// immediately after POST /issues/{id}/analyze completes.
+
+export interface PatchResponse {
+  id: number;
+  analysis_run_id: number;
+  repository_id: number;
+  issue_id?: number | null;
+  repository_full_name?: string | null;
+  issue_number?: number | null;
+  issue_title?: string | null;
+  /** "static" | "llm" */
+  mode: string;
+  /** Draft | Generated | Needs Review | Approved | Rejected */
+  status: string;
+  review_status: string;
+  summary?: string | null;
+  files_changed: string[];
+  unified_diff?: string | null;
+  reasoning?: string | null;
+  risks: string[];
+  created_at: string;
+}
+
+export interface RegressionTestResponse {
+  id: number;
+  analysis_run_id: number;
+  repository_id: number;
+  issue_id?: number | null;
+  repository_full_name?: string | null;
+  issue_number?: number | null;
+  issue_title?: string | null;
+  mode: string;
+  /** Generated | Not Generated */
+  status: string;
+  /** e.g. "Generated — Not Executed" */
+  execution_status: string;
+  review_status: string;
+  test_file?: string | null;
+  purpose?: string | null;
+  reproduction_scenario?: string | null;
+  expected_behavior?: string | null;
+  test_code?: string | null;
+  created_at: string;
+}
+
+export interface SecurityFindingResponse {
+  id: number;
+  analysis_run_id: number;
+  repository_id: number;
+  issue_id?: number | null;
+  repository_full_name?: string | null;
+  issue_number?: number | null;
+  issue_title?: string | null;
+  mode: string;
+  severity: string;
+  title: string;
+  detail?: string | null;
+  affected_area?: string | null;
+  blocking: boolean;
+  created_at: string;
+}
+
+export interface ReleaseReadinessResponse {
+  id: number;
+  analysis_run_id: number;
+  repository_id: number;
+  issue_id?: number | null;
+  repository_full_name?: string | null;
+  issue_number?: number | null;
+  issue_title?: string | null;
+  mode: string;
+  release_ready: boolean;
+  /** human_review_required | blocked */
+  status: string;
+  blocking_reasons: string[];
+  warnings: string[];
+  gate_checks: Array<{ title: string; detail: string; severity: string; category?: string | null }>;
+  human_approval_required: boolean;
+  created_at: string;
+}
+
+export interface ValidationRunResponse {
+  id?: number | null;
+  analysis_run_id: number;
+  repository_id: number;
+  issue_id?: number | null;
+  /** "passed" | "failed" | "timeout" | "validation_unavailable" | "setup_failed" */
+  status: string;
+  tests_run: boolean;
+  exit_code?: number | null;
+  stdout?: string | null;
+  stderr?: string | null;
+  duration_ms: number;
+  summary?: string | null;
+  failure_reason?: string | null;
+  executed_command?: string | null;
+  created_at?: string | null;
 }

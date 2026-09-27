@@ -111,6 +111,12 @@ class SecurityAuditAgent(BaseAgent):
         )
 
     async def _run_llm(self, context: AgentContext) -> AgentResult:
+        # The deterministic CWE/OWASP regex screen is always run first and is
+        # authoritative for `highest_severity` / blocking decisions — the LLM
+        # narrative below is supplementary context only and can never widen or
+        # narrow the deterministic verdict (SEC-01/SEC-03, Phase 6 Part 2).
+        static_result = self._run_static(context)
+
         issue = context.issue
         patch_result = context.previous_results.get("patch_synthesis")
         patch = patch_result.data.get("diff") if patch_result else None
@@ -125,18 +131,18 @@ class SecurityAuditAgent(BaseAgent):
         )
         completion = await self.llm_client.complete(SYSTEM_PROMPT, user_prompt)
 
+        llm_finding = AgentFinding(
+            title="LLM security audit (supplementary)",
+            detail=completion,
+            severity="info",
+            category="security",
+        )
+
         return AgentResult(
             agent_name=self.name,
             status="success",
             mode="llm",
-            summary="LLM-generated security audit.",
-            findings=[
-                AgentFinding(
-                    title="LLM security audit",
-                    detail=completion,
-                    severity="medium",
-                    category="security",
-                )
-            ],
-            data={"raw_completion": completion},
+            summary=static_result.summary,
+            findings=static_result.findings + [llm_finding],
+            data={**static_result.data, "raw_completion": completion},
         )

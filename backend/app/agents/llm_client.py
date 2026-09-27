@@ -20,12 +20,15 @@ class LLMClient:
     - **llm**: `complete()` calls the chat completions endpoint of any
       OpenAI-compatible server - OpenAI, Azure OpenAI, or a self-hosted vLLM
       deployment such as AMD Developer Cloud / ROCm - using `AI_BASE_URL` and
-      `AI_MODEL`. No code changes are needed to switch providers; only the
-      environment configuration changes.
+      `AI_MODEL` (the Phase 6 `LLM_BASE_URL` / `LLM_MODEL` equivalents). No
+      code changes are needed to switch providers; only the environment
+      configuration changes.
 
     A single instance is constructed at import time (`llm_client`, mirroring
     the `github_service` singleton pattern) and injected into every agent so
-    agents never instantiate their own HTTP clients.
+    agents never instantiate their own HTTP clients. Credentials are never
+    logged: `LLMClientError` messages never include the API key or the
+    Authorization header value.
     """
 
     def __init__(
@@ -35,12 +38,16 @@ class LLMClient:
         model: Optional[str] = None,
         api_key: Optional[str] = None,
         timeout: Optional[float] = None,
+        provider: Optional[str] = None,
+        max_tokens: Optional[int] = None,
     ):
         self.mode = (mode if mode is not None else settings.AI_MODE).lower()
         self.base_url = (base_url if base_url is not None else settings.AI_BASE_URL).rstrip("/")
         self.model = model if model is not None else settings.AI_MODEL
         self.api_key = api_key if api_key is not None else settings.AI_API_KEY
         self.timeout = timeout if timeout is not None else settings.AI_REQUEST_TIMEOUT_SECONDS
+        self.provider = (provider if provider is not None else settings.LLM_PROVIDER)
+        self.max_tokens = max_tokens if max_tokens is not None else settings.LLM_MAX_TOKENS
 
     @property
     def is_llm_mode(self) -> bool:
@@ -52,17 +59,26 @@ class LLMClient:
         system_prompt: str,
         user_prompt: str,
         temperature: float = 0.2,
-        max_tokens: int = 1024,
+        max_tokens: Optional[int] = None,
     ) -> str:
         """Request a chat completion from the configured OpenAI-compatible endpoint.
 
         Raises:
-            LLMClientError: If not configured for LLM mode, or the upstream request
-                times out, fails on the network, or returns a non-success/malformed response.
+            LLMClientError: If not configured for LLM mode ("LLM provider is not
+                configured."), or the upstream request times out ("LLM request
+                timed out."), fails on the network or returns a non-success
+                response ("LLM provider unavailable."), or returns a response
+                that cannot be parsed into a completion ("LLM returned an
+                invalid structured response.").
         """
-        if not self.is_llm_mode:
+        if self.mode != "llm":
             raise LLMClientError(
-                "LLM mode is not configured. Set AI_MODE=llm and AI_BASE_URL to enable model-backed analysis."
+                "LLM provider is not configured. Set AI_MODE=llm (Phase 6 LLM_PROVIDER) "
+                "and AI_BASE_URL (LLM_BASE_URL) to enable model-backed analysis."
+            )
+        if not self.base_url:
+            raise LLMClientError(
+                "LLM provider is not configured. LLM_BASE_URL (AI_BASE_URL) is empty."
             )
 
         url = f"{self.base_url}/chat/completions"
@@ -77,27 +93,32 @@ class LLMClient:
                 {"role": "user", "content": user_prompt},
             ],
             "temperature": temperature,
-            "max_tokens": max_tokens,
+            "max_tokens": max_tokens if max_tokens is not None else self.max_tokens,
         }
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             try:
                 response = await client.post(url, json=payload, headers=headers)
             except httpx.TimeoutException:
-                raise LLMClientError(f"LLM request to '{self.base_url}' timed out.")
+                raise LLMClientError("LLM request timed out.")
             except httpx.RequestError as exc:
-                raise LLMClientError(f"Network error contacting LLM endpoint: {str(exc)}")
+                # Never include headers/api_key in the error message.
+                raise LLMClientError(f"LLM provider unavailable: network error ({exc.__class__.__name__}).")
 
         if not response.is_success:
             raise LLMClientError(
-                f"LLM endpoint returned HTTP {response.status_code}: {response.text[:200]}"
+                f"LLM provider unavailable: upstream returned HTTP {response.status_code}."
             )
 
-        data = response.json()
+        try:
+            data = response.json()
+        except ValueError:
+            raise LLMClientError("LLM returned an invalid structured response.")
+
         try:
             return data["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError):
-            raise LLMClientError("LLM endpoint response did not contain a valid completion.")
+            raise LLMClientError("LLM returned an invalid structured response.")
 
 
 # Singleton client instance, injected into every agent.

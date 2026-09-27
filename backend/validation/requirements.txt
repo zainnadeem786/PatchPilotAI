@@ -1,0 +1,4 @@
+# PatchPilot Isolated Validation Sandbox Dependencies
+# Purpose: Minimal test execution dependencies for isolated regression test validation
+# Python compatibility: 3.13
+pytest==8.3.3

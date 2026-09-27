@@ -17,79 +17,20 @@ import {
   CloseIcon,
   ShieldIcon,
 } from "@/components/icons";
-import { api } from "@/lib/api";
+import { usePlatformStats, PlatformStats } from "@/context/PlatformStatsContext";
 
 // ── Sidebar statistics ────────────────────────────────────────────────────────
 //
-// Real data sources:
-//   repositoryCount  — GET /api/v1/repositories  (live backend count)
-//   issueCount       — GET /api/v1/issues          (live backend count)
-//   agentCount       — architectural constant: exactly 5 agents in the Phase 4
-//                      pipeline (Orchestrator, RepositoryIntelligence,
-//                      PatchSynthesis, RegressionTestSynthesis, SecurityAudit)
+// Every count comes from the canonical shared PlatformStatsContext,
+// synchronized in real time with backend PostgreSQL records:
 //
-// Unimplemented / no persistent data source yet:
-//   patchCount       — patches are transient per-analysis; no Patch model/table
-//   testCount        — test code is transient per-analysis; no Test model/table
-//   securityCount    — security findings are transient per-analysis; not persisted
-//   releaseStatus    — no release model or release-readiness state exists yet
-//
-// For unimplemented items we display "—" instead of a fake number so the UI
-// is always truthful about the current application state.
-
-/** Sentinel value rendered when no real data source exists yet. */
-const UNAVAILABLE = "—";
-
-interface SidebarStats {
-  repositoryCount: number | null; // null = still loading or failed
-  issueCount: number | null;
-  agentCount: number | null;      // derived from canonical /api/v1/agents registry
-}
-
-/**
- * Fetches repository count, issue count, and agent count from the real backend
- * API once on mount.  Returns null for a stat if the request is still in
- * flight or failed.  Never falls back to mock values.
- */
-function useSidebarStats(): SidebarStats {
-  const [repositoryCount, setRepositoryCount] = useState<number | null>(null);
-  const [issueCount, setIssueCount] = useState<number | null>(null);
-  const [agentCount, setAgentCount] = useState<number | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function fetchStats() {
-      // Fetch all three in parallel; each failure is isolated.
-      const [repoResult, issueResult, agentResult] = await Promise.allSettled([
-        api.getRepositories(),
-        api.getIssues(),
-        api.getAgents(),
-      ]);
-
-      if (cancelled) return;
-
-      if (repoResult.status === "fulfilled") {
-        setRepositoryCount(repoResult.value.length);
-      }
-
-      if (issueResult.status === "fulfilled") {
-        setIssueCount(issueResult.value.length);
-      }
-
-      if (agentResult.status === "fulfilled") {
-        setAgentCount(agentResult.value.length);
-      }
-    }
-
-    fetchStats();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return { repositoryCount, issueCount, agentCount };
-}
+//   repositoryCount — GET /api/v1/repositories
+//   openIssueCount  — GET /api/v1/issues (filtered to open issues for active triage)
+//   agentCount      — GET /api/v1/agents (canonical registry)
+//   patchCount      — GET /api/v1/patches
+//   testCount       — GET /api/v1/tests
+//   securityCount   — GET /api/v1/security
+//   releaseCount    — GET /api/v1/releases
 
 // ── Navigation item type ──────────────────────────────────────────────────────
 
@@ -102,8 +43,16 @@ interface NavItem {
 }
 
 /** Builds the main nav list with live badge values injected. */
-function buildMainNav(stats: SidebarStats): NavItem[] {
-  const { repositoryCount, issueCount, agentCount } = stats;
+function buildMainNav(stats: PlatformStats): NavItem[] {
+  const {
+    repositoryCount,
+    openIssueCount,
+    agentCount,
+    patchCount,
+    testCount,
+    securityCount,
+    releaseCount,
+  } = stats;
 
   return [
     {
@@ -123,7 +72,8 @@ function buildMainNav(stats: SidebarStats): NavItem[] {
       name: "Issues",
       href: "/issues",
       icon: IssueIcon,
-      badge: issueCount === null ? "…" : String(issueCount),
+      // Semantically aligns with Overview's "Open Issues" (active triage count).
+      badge: openIssueCount === null ? "…" : String(openIssueCount),
     },
     {
       name: "Agents",
@@ -136,29 +86,25 @@ function buildMainNav(stats: SidebarStats): NavItem[] {
       name: "Patches",
       href: "/patches",
       icon: PatchIcon,
-      // No persisted patch model; patches are transient per-analysis results.
-      badge: UNAVAILABLE,
+      badge: patchCount === null ? "…" : String(patchCount),
     },
     {
       name: "Tests",
       href: "/tests",
       icon: TestIcon,
-      // No persisted test model; test code is transient per-analysis results.
-      badge: UNAVAILABLE,
+      badge: testCount === null ? "…" : String(testCount),
     },
     {
       name: "Security",
       href: "/security",
       icon: SecurityIcon,
-      // No global security findings persistence; findings are per-analysis only.
-      badge: UNAVAILABLE,
+      badge: securityCount === null ? "…" : String(securityCount),
     },
     {
       name: "Releases",
       href: "/releases",
       icon: ReleaseIcon,
-      // No release model or release-readiness state implemented yet.
-      badge: UNAVAILABLE,
+      badge: releaseCount === null ? "…" : String(releaseCount),
     },
   ];
 }
@@ -177,7 +123,7 @@ export interface SidebarProps {
 
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
   const pathname = usePathname();
-  const stats = useSidebarStats();
+  const { stats } = usePlatformStats();
   const mainNav = buildMainNav(stats);
 
   const isLinkActive = (href: string) => {
@@ -255,8 +201,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
                         className={`px-1.5 py-0.2 rounded text-[10px] font-mono ${
                           active
                             ? "bg-indigo-100 dark:bg-indigo-500/25 text-indigo-800 dark:text-indigo-200 font-semibold"
-                            : item.badge === UNAVAILABLE
-                            ? "bg-cream-200 dark:bg-slate-800 text-charcoal-400 dark:text-slate-600"
                             : "bg-cream-200 dark:bg-slate-800 text-charcoal-500 dark:text-slate-400"
                         }`}
                       >

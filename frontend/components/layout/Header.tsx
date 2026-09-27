@@ -14,11 +14,39 @@ import {
   CloseIcon,
   ArrowRightIcon,
 } from "@/components/icons";
-import { MOCK_REPOSITORIES, MOCK_ISSUES, MOCK_AGENTS } from "@/data/mockData";
+import { BackendRepository, BackendIssue, AgentRegistryEntry } from "@/types/api";
 
 export interface HeaderProps {
   onOpenSidebar: () => void;
   onOpenConnectModal: () => void;
+}
+
+/** Fetches real repositories/issues/agents once on mount for the quick-search palette. Never mock data. */
+function useSearchData() {
+  const [repositories, setRepositories] = useState<BackendRepository[]>([]);
+  const [issues, setIssues] = useState<BackendIssue[]>([]);
+  const [agents, setAgents] = useState<AgentRegistryEntry[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      const [repoResult, issueResult, agentResult] = await Promise.allSettled([
+        api.getRepositories(),
+        api.getIssues(),
+        api.getAgents(),
+      ]);
+      if (cancelled) return;
+      if (repoResult.status === "fulfilled") setRepositories(repoResult.value);
+      if (issueResult.status === "fulfilled") setIssues(issueResult.value);
+      if (agentResult.status === "fulfilled") setAgents(agentResult.value);
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return { repositories, issues, agents };
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -28,6 +56,7 @@ export const Header: React.FC<HeaderProps> = ({
   const pathname = usePathname();
   const router = useRouter();
   const [healthStatus, setHealthStatus] = useState<"idle" | "checking" | "ok" | "offline">("idle");
+  const { repositories, issues, agents } = useSearchData();
 
   // Search Bar State
   const [searchQuery, setSearchQuery] = useState("");
@@ -100,32 +129,31 @@ export const Header: React.FC<HeaderProps> = ({
   const q = searchQuery.toLowerCase().trim();
 
   const matchedRepos = q
-    ? MOCK_REPOSITORIES.filter(
+    ? repositories.filter(
         (r) =>
           r.name.toLowerCase().includes(q) ||
-          r.language.toLowerCase().includes(q) ||
-          r.description.toLowerCase().includes(q)
+          (r.language ?? "").toLowerCase().includes(q) ||
+          (r.description ?? "").toLowerCase().includes(q)
       ).slice(0, 3)
-    : MOCK_REPOSITORIES.slice(0, 2);
+    : repositories.slice(0, 2);
 
   const matchedIssues = q
-    ? MOCK_ISSUES.filter(
+    ? issues.filter(
         (i) =>
           i.title.toLowerCase().includes(q) ||
           String(i.number).includes(q) ||
-          i.repo.toLowerCase().includes(q) ||
-          i.severity.toLowerCase().includes(q)
+          i.state.toLowerCase().includes(q)
       ).slice(0, 3)
-    : MOCK_ISSUES.slice(0, 2);
+    : issues.slice(0, 2);
 
   const matchedAgents = q
-    ? MOCK_AGENTS.filter(
+    ? agents.filter(
         (a) =>
-          a.name.toLowerCase().includes(q) ||
+          a.display_name.toLowerCase().includes(q) ||
           a.role.toLowerCase().includes(q) ||
           a.description.toLowerCase().includes(q)
       ).slice(0, 3)
-    : MOCK_AGENTS.slice(0, 2);
+    : agents.slice(0, 2);
 
   const navigationShortcuts = [
     { label: "Patch Review", path: "/patches", desc: "Inspect & approve unified diffs" },
@@ -159,7 +187,7 @@ export const Header: React.FC<HeaderProps> = ({
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
       if (matchedIssues.length > 0) {
-        handleNavigate(`/issues/${matchedIssues[0].number}`);
+        handleNavigate(`/issues/${matchedIssues[0].id}`);
       } else if (matchedRepos.length > 0) {
         handleNavigate("/repositories");
       } else if (matchedAgents.length > 0) {
@@ -256,7 +284,7 @@ export const Header: React.FC<HeaderProps> = ({
                     {matchedIssues.map((issue) => (
                       <div
                         key={issue.id}
-                        onClick={() => handleNavigate(`/issues/${issue.number}`)}
+                        onClick={() => handleNavigate(`/issues/${issue.id}`)}
                         className="px-3 py-1.5 flex items-center justify-between hover:bg-cream-200/70 dark:hover:bg-slate-800/70 cursor-pointer transition-colors duration-100"
                       >
                         <div className="flex items-center gap-2 min-w-0">
@@ -266,7 +294,7 @@ export const Header: React.FC<HeaderProps> = ({
                           </span>
                         </div>
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-cream-200 dark:bg-slate-800 text-charcoal-600 dark:text-slate-400 shrink-0 ml-2 uppercase">
-                          {issue.severity}
+                          {issue.state}
                         </span>
                       </div>
                     ))}
@@ -292,7 +320,7 @@ export const Header: React.FC<HeaderProps> = ({
                           </span>
                         </div>
                         <span className="text-[10px] text-charcoal-500 dark:text-slate-500 shrink-0 ml-2">
-                          {repo.language}
+                          {repo.language || "—"}
                         </span>
                       </div>
                     ))}
@@ -307,14 +335,14 @@ export const Header: React.FC<HeaderProps> = ({
                     </div>
                     {matchedAgents.map((agent) => (
                       <div
-                        key={agent.id}
+                        key={agent.name}
                         onClick={() => handleNavigate("/agents")}
                         className="px-3 py-1.5 flex items-center justify-between hover:bg-cream-200/70 dark:hover:bg-slate-800/70 cursor-pointer transition-colors duration-100"
                       >
                         <div className="flex items-center gap-2 min-w-0">
                           <AgentIcon className="w-3.5 h-3.5 text-amber-500 shrink-0" />
                           <span className="text-charcoal-800 dark:text-slate-200 truncate">
-                            {agent.name}
+                            {agent.display_name}
                           </span>
                         </div>
                         <span className="text-[10px] text-charcoal-500 dark:text-slate-500 shrink-0 ml-2">

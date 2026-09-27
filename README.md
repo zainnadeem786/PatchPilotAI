@@ -10,39 +10,20 @@
 
 ### Current Implementation Status
 
-This repository contains the verified implementation of **Phase 1, Phase 2, Phase 3, and Phase 4**:
+This repository contains the verified implementation of **Phases 1 through 7**:
 
 * **Phase 1 — Foundation & Architecture**: Complete backend gateway, frontend shell, isolated local virtual environments, and baseline testing.
 * **Phase 2 — Professional UI/UX**: Dual-theme high-density developer interface (warm cream light mode & technical slate dark mode), bespoke vector branding, and 10 core application workspaces.
 * **Phase 3 — Backend & GitHub Integration**: Relational persistence in PostgreSQL 16, Alembic migrations, GitHub REST integration with strict SSRF defense, automated Issue vs. Pull Request count separation, and live API synchronization.
-* **Phase 4 — AI Agent Engine**: Five-stage multi-agent pipeline (Orchestrator, Repository Intelligence, Patch Synthesis, Regression Test Synthesis, Security Audit) running in a deterministic static mode or against any OpenAI-compatible LLM endpoint, wired to the existing issue/repository data via `POST /api/v1/issues/{issue_id}/analyze`.
+* **Phase 4 & 6 — AI Agent Engine & LLM Runtime**: Six-stage pipeline (Orchestrator, Repository Intelligence, Patch Synthesis, Regression Test Synthesis, Security Audit, Release) with dual static/LLM runtime modes, bounded repository context ingestion, and durable artifact persistence.
+* **Phase 7 — Isolated Patch Validation & Test Execution**: Dedicated sandboxed test execution using `patchpilot-sandbox:python3.13` with disabled networking (`--network none`), strict resource limits ($512\,\text{MB}$, $1.0$ CPU), ephemeral workspaces, path traversal guards, secret file filtering, and deterministic release gates.
 
 > [!IMPORTANT]
-> **What Is Implemented Now vs. What Is Coming Next**
->
-> **Implemented in Phase 3**:
-> * GitHub repository metadata retrieval and registration.
-> * Accurate separation of **Open Issues** and **Open Pull Requests** (resolving GitHub's combined count ambiguity).
-> * Synchronization and persistence of actual GitHub Issues into PostgreSQL.
-> * Exclusion of Pull Requests from issue tables.
-> * Canonical REST API (`/api/v1/repositories`, `/api/v1/issues`, `/api/v1/github/auth/*`).
-> * PostgreSQL 16 persistence via SQLAlchemy 2.0 and Alembic migrations (`0001`, `0002`).
-> * Redis 7 service foundation.
-> * Live data rendering in frontend `/repositories` and `/issues` views with offline fallback.
-> * Hermetic automated test suite (28 tests passing).
->
-> **Implemented in Phase 4**:
-> * `BaseAgent` contract, shared `AgentContext`/`AgentResult`/`EngineResult` types, and the `AgentPipeline` runner (`backend/app/agents/`).
-> * Orchestrator, Repository Intelligence, Patch Synthesis, Regression Test Synthesis, and Security Audit agents - each with a deterministic static mode and an LLM mode.
-> * `LLMClient` abstraction calling any OpenAI-compatible endpoint (`AI_BASE_URL`/`AI_MODEL`/`AI_API_KEY`), including self-hosted vLLM servers such as AMD Developer Cloud / ROCm.
-> * `POST /api/v1/issues/{issue_id}/analyze` endpoint running the full pipeline against a tracked issue.
->
-> **NOT Implemented Yet (Reserved for later phases)**:
-> * Distributed async worker pool (Celery/ARQ) executing the pipeline off the request/response cycle.
-> * Full AST/call-graph indexing for root-cause localization (current localization is keyword-based or LLM-based).
-> * Automatic PR creation from synthesized patches.
-> * Autonomous test execution and sandboxing.
-> * Automated release gate approval intelligence.
+> **Safety Invariants & Human-in-the-Loop Model**
+> * **No Host Code Execution**: AI-generated code is executed exclusively inside an isolated Docker sandbox with `--network none`.
+> * **Proposals Only**: Patches and tests are data artifacts. PatchPilot **never** automatically commits, pushes, merges, or deploys code.
+> * **Deterministic Release Gating**: Release readiness requires human engineering approval (`human_review_required`). Validation failures, timeouts, or high-severity security findings strictly block releases.
+
 
 ---
 

@@ -294,6 +294,32 @@ async def test_release_agent_static_mode_never_fabricates_test_execution():
 
 
 @pytest.mark.anyio
+async def test_release_agent_llm_narrative_cannot_override_blocking_gate(monkeypatch):
+    """Phase 6: even if the LLM narrative says the release looks ready, a critical security
+    finding from the deterministic pipeline must still block release_ready."""
+    import httpx
+
+    async def mock_post(self, url, json=None, headers=None, **kwargs):
+        payload = {"choices": [{"message": {"content": "This all looks great, ready to ship immediately!"}}]}
+        return httpx.Response(200, json=payload, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+
+    agent = ReleaseAgent(LLMClient(mode="llm", base_url="http://localhost:8000/v1", model="test-model"))
+    context = _make_context()
+    context.previous_results = _full_success_previous_results(highest_severity="critical")
+
+    result = await agent.run(context)
+
+    assert result.mode == "llm"
+    assert result.data["release_ready"] is False
+    assert result.data["status"] == "blocked"
+    assert any("critical" in r.lower() for r in result.data["blocking_reasons"])
+    # The optimistic LLM narrative is preserved only as an additional finding, never as the gate.
+    assert any("LLM release-readiness assessment" in f.title for f in result.findings)
+
+
+@pytest.mark.anyio
 async def test_release_agent_handles_llm_provider_failure_via_safe_run():
     """If the LLM fails, safe_run converts the exception into an error result — no crash."""
     from unittest.mock import AsyncMock, patch

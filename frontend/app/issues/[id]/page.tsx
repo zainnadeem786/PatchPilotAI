@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, use } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
-import { BackendIssue, AgentResultResponse, AgentFindingResponse, EngineResultResponse } from "@/types/api";
+import { BackendIssue, AgentResultResponse, AgentFindingResponse, EngineResultResponse, ValidationRunResponse } from "@/types/api";
 import { Badge } from "@/components/ui/Badge";
 import {
   SparklesIcon,
@@ -267,6 +267,11 @@ export default function IssueDetailPage({ params }: PageProps) {
   const [analysisResult, setAnalysisResult] = useState<EngineResultResponse | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
 
+  // Validation state (Phase 7 isolated execution)
+  const [validationRun, setValidationRun] = useState<ValidationRunResponse | null>(null);
+  const [isValidating, setIsValidating] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
+
   // Active tab for the issue body area
   const [activeTab, setActiveTab] = useState<"overview" | "analysis">("overview");
 
@@ -279,6 +284,16 @@ export default function IssueDetailPage({ params }: PageProps) {
       const data = await api.getIssue(issueId);
       setIssue(data);
       setIssueStatus("loaded");
+
+      // Best-effort load latest validation run for this issue
+      try {
+        const valRuns = await api.getValidationRuns(undefined, issueId);
+        if (valRuns && valRuns.length > 0) {
+          setValidationRun(valRuns[0]);
+        }
+      } catch {
+        // Non-blocking
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to load issue.";
       if (msg.includes("404") || msg.toLowerCase().includes("not found")) {
@@ -294,7 +309,7 @@ export default function IssueDetailPage({ params }: PageProps) {
     loadIssue();
   }, [loadIssue]);
 
-  // ── Run Phase 4 analysis ────────────────────────────────────────────────────
+  // ── Run Phase 4 & 7 analysis ────────────────────────────────────────────────
 
   const runAnalysis = useCallback(async () => {
     if (analysisState === "running") return; // prevent duplicate submissions
@@ -311,8 +326,14 @@ export default function IssueDetailPage({ params }: PageProps) {
       const result = await api.analyzeIssue(issueId);
       clearTimeout(timeoutId);
       setAnalysisResult(result);
+      if (result.validation) {
+        setValidationRun(result.validation);
+      }
       setAnalysisState("completed");
       setActiveTab("analysis");
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("patchpilot:refresh-stats"));
+      }
     } catch (err: unknown) {
       clearTimeout(timeoutId);
       const msg = err instanceof Error ? err.message : "Analysis failed.";
@@ -320,6 +341,23 @@ export default function IssueDetailPage({ params }: PageProps) {
       setAnalysisState("failed");
     }
   }, [issueId, analysisState]);
+
+  // ── Run isolated validation on demand (Phase 7) ─────────────────────────────
+
+  const runValidation = useCallback(async (analysisRunId?: number | null) => {
+    const targetRunId = analysisRunId || validationRun?.analysis_run_id;
+    if (!targetRunId) return;
+    setIsValidating(true);
+    setValidationError(null);
+    try {
+      const updated = await api.validateAnalysis(targetRunId);
+      setValidationRun(updated);
+    } catch (err: unknown) {
+      setValidationError(err instanceof Error ? err.message : "Validation execution failed.");
+    } finally {
+      setIsValidating(false);
+    }
+  }, [validationRun]);
 
   // ── Derived helpers ─────────────────────────────────────────────────────────
 
@@ -740,10 +778,24 @@ export default function IssueDetailPage({ params }: PageProps) {
                   badge={
                     regressionAgent && (
                       <Badge
-                        variant={regressionAgent.status === "success" ? "info" : "error"}
+                        variant={
+                          validationRun?.status === "passed"
+                            ? "success"
+                            : validationRun?.status === "failed"
+                            ? "error"
+                            : regressionAgent.status === "success"
+                            ? "info"
+                            : "error"
+                        }
                         size="sm"
                       >
-                        {regressionAgent.status === "success" ? "Recommended Test" : "Failed"}
+                        {validationRun?.status === "passed"
+                          ? "Validated (Passed)"
+                          : validationRun?.status === "failed"
+                          ? "Validated (Failed)"
+                          : regressionAgent.status === "success"
+                          ? "Recommended Test"
+                          : "Failed"}
                       </Badge>
                     )
                   }
@@ -751,10 +803,24 @@ export default function IssueDetailPage({ params }: PageProps) {
                 >
                   <div className="space-y-3">
                     {/* Test execution disclaimer */}
-                    <div className="flex items-start gap-2 p-2.5 rounded border border-sky-200 dark:border-sky-500/30 bg-sky-50/60 dark:bg-sky-950/20 text-[11px] font-mono text-sky-800 dark:text-sky-300">
-                      <ClockIcon className="w-3.5 h-3.5 shrink-0 mt-0.5 text-sky-600 dark:text-sky-400" />
+                    <div className={`flex items-start gap-2 p-2.5 rounded border text-[11px] font-mono ${
+                      validationRun?.status === "passed"
+                        ? "border-emerald-200 dark:border-emerald-500/30 bg-emerald-50/60 dark:bg-emerald-950/20 text-emerald-800 dark:text-emerald-300"
+                        : validationRun?.status === "failed"
+                        ? "border-rose-200 dark:border-rose-500/30 bg-rose-50/60 dark:bg-rose-950/20 text-rose-800 dark:text-rose-300"
+                        : "border-sky-200 dark:border-sky-500/30 bg-sky-50/60 dark:bg-sky-950/20 text-sky-800 dark:text-sky-300"
+                    }`}>
+                      <ClockIcon className="w-3.5 h-3.5 shrink-0 mt-0.5" />
                       <span>
-                        <strong>Recommended test — not executed.</strong> This test was generated by the Regression Test Synthesis agent and has not been run. Execution status will not be shown until the test is actually run in your CI pipeline.
+                        {validationRun?.tests_run ? (
+                          <>
+                            <strong>Isolated Test Execution: {validationRun.status === "passed" ? "PASSED" : "FAILED"}.</strong> This regression test was executed inside the isolated Docker sandbox ({validationRun.duration_ms} ms).
+                          </>
+                        ) : (
+                          <>
+                            <strong>Recommended test — not executed on host.</strong> This test was generated by the Regression Test Synthesis agent.
+                          </>
+                        )}
                       </span>
                     </div>
 
@@ -788,6 +854,180 @@ export default function IssueDetailPage({ params }: PageProps) {
                           <p className="text-[11px] font-mono text-charcoal-500 dark:text-slate-400">
                             No test code was generated in this mode.
                           </p>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </Section>
+
+                {/* ── Isolated Patch Validation (Phase 7) ──────────────────── */}
+                <Section
+                  title="Isolated Patch Validation (Docker Sandbox)"
+                  icon={<TestIcon className="w-3.5 h-3.5 text-emerald-500" />}
+                  badge={
+                    validationRun ? (
+                      <Badge
+                        variant={
+                          validationRun.status === "passed"
+                            ? "success"
+                            : validationRun.status === "failed"
+                            ? "error"
+                            : validationRun.status === "timeout"
+                            ? "warning"
+                            : "neutral"
+                        }
+                        size="sm"
+                      >
+                        {validationRun.status === "passed"
+                          ? "Passed"
+                          : validationRun.status === "failed"
+                          ? "Failed"
+                          : validationRun.status === "timeout"
+                          ? "Timeout"
+                          : validationRun.status === "setup_failed"
+                          ? "Setup Failed"
+                          : "Unavailable"}
+                      </Badge>
+                    ) : (
+                      <Badge variant="neutral" size="sm">Not Executed</Badge>
+                    )
+                  }
+                  defaultOpen={true}
+                >
+                  <div className="space-y-3">
+                    {/* Safety notice */}
+                    <div className="flex items-start gap-2 p-2.5 rounded border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50/60 dark:bg-emerald-950/20 text-[11px] font-mono text-emerald-800 dark:text-emerald-300">
+                      <ShieldIcon className="w-3.5 h-3.5 shrink-0 mt-0.5 text-emerald-600 dark:text-emerald-400" />
+                      <span>
+                        <strong>Isolated Docker Sandbox.</strong> Tests and patches execute in an ephemeral container with strict resource limits and disabled networking (<code>--network none</code>). No generated code is executed on the host.
+                      </span>
+                    </div>
+
+                    {validationError && (
+                      <div className="p-3 rounded border border-rose-200 dark:border-rose-800/40 bg-rose-50/40 dark:bg-rose-950/20 text-[11px] font-mono text-rose-700 dark:text-rose-300">
+                        {validationError}
+                      </div>
+                    )}
+
+                    {!validationRun ? (
+                      <div className="rounded-md border border-cream-200 dark:border-slate-800 bg-cream-50 dark:bg-slate-950/60 p-4 text-center space-y-2">
+                        <ClockIcon className="w-5 h-5 text-charcoal-400 dark:text-slate-500 mx-auto" />
+                        <p className="text-xs text-charcoal-600 dark:text-slate-400 font-mono">
+                          No validation run recorded for this analysis yet.
+                        </p>
+                      </div>
+                    ) : (
+                      <>
+                        {/* Summary & Metrics grid */}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                          <div className="rounded-md border border-cream-200 dark:border-slate-800 bg-cream-50 dark:bg-slate-950/60 p-2.5">
+                            <span className="text-[10px] font-mono text-charcoal-400 dark:text-slate-500 uppercase block">Status</span>
+                            <span className={`text-xs font-mono font-bold capitalize ${
+                              validationRun.status === "passed"
+                                ? "text-emerald-600 dark:text-emerald-400"
+                                : validationRun.status === "failed"
+                                ? "text-rose-600 dark:text-rose-400"
+                                : "text-amber-600 dark:text-amber-400"
+                            }`}>
+                              {validationRun.status.replace(/_/g, " ")}
+                            </span>
+                          </div>
+                          <div className="rounded-md border border-cream-200 dark:border-slate-800 bg-cream-50 dark:bg-slate-950/60 p-2.5">
+                            <span className="text-[10px] font-mono text-charcoal-400 dark:text-slate-500 uppercase block">Tests Executed</span>
+                            <span className="text-xs font-mono font-semibold text-charcoal-800 dark:text-slate-200">
+                              {validationRun.tests_run ? "Yes (In Sandbox)" : "No"}
+                            </span>
+                          </div>
+                          <div className="rounded-md border border-cream-200 dark:border-slate-800 bg-cream-50 dark:bg-slate-950/60 p-2.5">
+                            <span className="text-[10px] font-mono text-charcoal-400 dark:text-slate-500 uppercase block">Duration</span>
+                            <span className="text-xs font-mono font-semibold text-charcoal-800 dark:text-slate-200">
+                              {validationRun.duration_ms} ms
+                            </span>
+                          </div>
+                          <div className="rounded-md border border-cream-200 dark:border-slate-800 bg-cream-50 dark:bg-slate-950/60 p-2.5">
+                            <span className="text-[10px] font-mono text-charcoal-400 dark:text-slate-500 uppercase block">Exit Code</span>
+                            <span className="text-xs font-mono font-semibold text-charcoal-800 dark:text-slate-200">
+                              {validationRun.exit_code !== null && validationRun.exit_code !== undefined ? validationRun.exit_code : "N/A"}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Summary description */}
+                        {validationRun.summary && (
+                          <div className="p-3 rounded-md border border-cream-200 dark:border-slate-800 bg-cream-50 dark:bg-slate-950/60">
+                            <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-charcoal-400 dark:text-slate-500 block mb-1">
+                              Validation Outcome
+                            </span>
+                            <p className="text-[11px] font-mono text-charcoal-700 dark:text-slate-300 leading-relaxed">
+                              {validationRun.summary}
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Failure reason if present */}
+                        {validationRun.failure_reason && (
+                          <div className="p-3 rounded-md border border-rose-200 dark:border-rose-800/40 bg-rose-50/40 dark:bg-rose-950/20">
+                            <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400 block mb-1">
+                              Failure Reason
+                            </span>
+                            <p className="text-[11px] font-mono text-rose-700 dark:text-rose-300 leading-relaxed">
+                              {validationRun.failure_reason}
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Executed command */}
+                        {validationRun.executed_command && (
+                          <div className="text-[11px] font-mono text-charcoal-600 dark:text-slate-400">
+                            <span className="text-[10px] font-bold text-charcoal-400 dark:text-slate-500 uppercase block mb-1">
+                              Sandbox Test Command
+                            </span>
+                            <code className="p-2 rounded bg-slate-900 text-slate-200 block border border-slate-800 text-[10px]">
+                              {validationRun.executed_command}
+                            </code>
+                          </div>
+                        )}
+
+                        {/* Sandbox Console Output (Stdout / Stderr) */}
+                        {(validationRun.stdout || validationRun.stderr) && (
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-charcoal-400 dark:text-slate-500">
+                                Sandbox Output
+                              </span>
+                              <CopyButton text={`${validationRun.stdout || ""}\n${validationRun.stderr || ""}`} />
+                            </div>
+                            <pre className="p-3.5 rounded-lg border border-cream-300 dark:border-slate-800 bg-[#0d1117] font-mono text-xs text-slate-200 overflow-x-auto leading-relaxed max-h-64 whitespace-pre-wrap">
+                              {validationRun.stdout}
+                              {validationRun.stderr && (
+                                <span className="text-rose-400">{`\n--- STDERR ---\n${validationRun.stderr}`}</span>
+                              )}
+                            </pre>
+                          </div>
+                        )}
+
+                        {/* Re-run button if analysis_run_id exists */}
+                        {validationRun.analysis_run_id && (
+                          <div className="pt-2 flex items-center justify-end">
+                            <button
+                              type="button"
+                              onClick={() => runValidation(validationRun.analysis_run_id)}
+                              disabled={isValidating}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono font-medium rounded border border-indigo-300 dark:border-indigo-600 bg-cream-50 dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 transition-colors disabled:opacity-50"
+                            >
+                              {isValidating ? (
+                                <>
+                                  <span className="w-3 h-3 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+                                  <span>Validating in Sandbox…</span>
+                                </>
+                              ) : (
+                                <>
+                                  <TestIcon className="w-3.5 h-3.5" />
+                                  <span>Re-run Sandbox Validation</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
                         )}
                       </>
                     )}
