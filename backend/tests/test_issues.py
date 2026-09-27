@@ -42,7 +42,12 @@ def test_list_issues_empty(client: TestClient):
     """Verify empty list is returned when no issues exist."""
     response = client.get("/api/v1/issues")
     assert response.status_code == 200
-    assert response.json() == []
+    data = response.json()
+    assert data["items"] == []
+    assert data["total"] == 0
+    assert data["total_pages"] == 0
+    assert data["has_next"] is False
+    assert data["has_previous"] is False
 
 
 def test_list_and_filter_issues(client: TestClient, monkeypatch):
@@ -67,28 +72,30 @@ def test_list_and_filter_issues(client: TestClient, monkeypatch):
     issues_res = client.get("/api/v1/issues")
     assert issues_res.status_code == 200
     all_issues = issues_res.json()
-    assert len(all_issues) == 2
+    assert len(all_issues["items"]) == 2
+    assert all_issues["total"] == 2
+    assert all_issues["total_pages"] == 1
 
     # 3. Filter by repository_id
     repo_issues_res = client.get(f"/api/v1/issues?repository_id={repo_id}")
     assert repo_issues_res.status_code == 200
-    assert len(repo_issues_res.json()) == 2
+    assert len(repo_issues_res.json()["items"]) == 2
 
     # 4. Filter by state
     open_issues = client.get("/api/v1/issues?state=open").json()
-    assert len(open_issues) == 1
-    assert open_issues[0]["state"] == "open"
-    assert open_issues[0]["number"] == 1
+    assert len(open_issues["items"]) == 1
+    assert open_issues["items"][0]["state"] == "open"
+    assert open_issues["items"][0]["number"] == 1
 
     closed_issues = client.get("/api/v1/issues?state=closed").json()
-    assert len(closed_issues) == 1
-    assert closed_issues[0]["state"] == "closed"
-    assert closed_issues[0]["number"] == 2
+    assert len(closed_issues["items"]) == 1
+    assert closed_issues["items"][0]["state"] == "closed"
+    assert closed_issues["items"][0]["number"] == 2
 
     # 5. List via repo subresource
     sub_issues_res = client.get(f"/api/v1/repositories/{repo_id}/issues")
     assert sub_issues_res.status_code == 200
-    assert len(sub_issues_res.json()) == 2
+    assert len(sub_issues_res.json()["items"]) == 2
 
 
 def test_get_issue_by_id(client: TestClient, monkeypatch):
@@ -104,12 +111,14 @@ def test_get_issue_by_id(client: TestClient, monkeypatch):
 
     client.post("/api/v1/repositories", json={"owner": "octocat", "name": "Hello-World"})
     issues = client.get("/api/v1/issues").json()
-    target_id = issues[0]["id"]
+    items = issues.get("items", issues) if isinstance(issues, dict) else issues
+    target_id = items[0]["id"]
 
     res = client.get(f"/api/v1/issues/{target_id}")
     assert res.status_code == 200
     assert res.json()["id"] == target_id
-    assert res.json()["number"] == issues[0]["number"]
+    assert res.json()["number"] == items[0]["number"]
+
 
 
 def test_get_issue_not_found(client: TestClient):
@@ -168,10 +177,12 @@ def test_sync_issues_excludes_pull_requests(client: TestClient, monkeypatch):
     issues_res = client.get(f"/api/v1/repositories/{repo_id}/issues")
     assert issues_res.status_code == 200
     issues = issues_res.json()
-    assert len(issues) == 1
-    assert issues[0]["number"] == 10
-    assert issues[0]["title"] == "Actual GitHub Issue"
-    assert "pull_request" not in issues[0]
+    items = issues.get("items", issues) if isinstance(issues, dict) else issues
+    assert len(items) == 1
+    assert items[0]["number"] == 10
+    assert items[0]["title"] == "Actual GitHub Issue"
+    assert "pull_request" not in items[0]
+
 
 
 def test_direct_sync_excludes_pull_requests(db_session):
@@ -230,7 +241,8 @@ def test_analyze_issue_runs_agent_pipeline(client: TestClient, monkeypatch):
     monkeypatch.setattr(github_service, "get_repository_contents", mock_get_contents)
 
     client.post("/api/v1/repositories", json={"owner": "octocat", "name": "Hello-World"})
-    issue_id = client.get("/api/v1/issues").json()[0]["id"]
+    issues_res = client.get("/api/v1/issues").json()
+    issue_id = (issues_res.get("items") if isinstance(issues_res, dict) else issues_res)[0]["id"]
 
     response = client.post(f"/api/v1/issues/{issue_id}/analyze")
 
@@ -285,7 +297,8 @@ def test_analyze_issue_partial_agent_failure(client: TestClient, monkeypatch):
     monkeypatch.setattr(SecurityAuditAgent, "run", mock_security_run)
 
     client.post("/api/v1/repositories", json={"owner": "octocat", "name": "Hello-World"})
-    issue_id = client.get("/api/v1/issues").json()[0]["id"]
+    issues_res = client.get("/api/v1/issues").json()
+    issue_id = (issues_res.get("items") if isinstance(issues_res, dict) else issues_res)[0]["id"]
 
     response = client.post(f"/api/v1/issues/{issue_id}/analyze")
 
@@ -341,7 +354,9 @@ def test_analyze_issue_response_schema(client: TestClient, monkeypatch):
     monkeypatch.setattr(github_service, "get_repository_contents", mock_get_contents)
 
     client.post("/api/v1/repositories", json={"owner": "octocat", "name": "Hello-World"})
-    issue_id = client.get("/api/v1/issues").json()[0]["id"]
+    issues_res = client.get("/api/v1/issues").json()
+    issue_id = (issues_res.get("items") if isinstance(issues_res, dict) else issues_res)[0]["id"]
+
 
     response = client.post(f"/api/v1/issues/{issue_id}/analyze")
     assert response.status_code == 200
@@ -371,3 +386,213 @@ def test_analyze_issue_response_schema(client: TestClient, monkeypatch):
             assert "detail" in finding
             assert "severity" in finding
 
+
+def test_pagination_default_page_size_and_metadata(client: TestClient, monkeypatch):
+    """Verify default page size is 50 and all pagination metadata fields are populated."""
+    sample_issues = [
+        {
+            "id": 2000 + i,
+            "number": i,
+            "title": f"Issue {i}",
+            "state": "open",
+            "html_url": f"https://github.com/test/repo/issues/{i}",
+            "user": {"login": "dev"},
+        }
+        for i in range(1, 61)
+    ]
+    repo_data = {
+        "id": 8881,
+        "name": "repo-paginate",
+        "full_name": "acme/repo-paginate",
+        "owner": {"login": "acme"},
+        "open_issues_count": 60,
+        "default_branch": "main",
+        "private": False,
+        "html_url": "https://github.com/acme/repo-paginate",
+        "language": "Python",
+    }
+
+    async def mock_get_repo(owner, name, token=None):
+        return repo_data
+
+    async def mock_list_issues(owner, name, state="open", token=None):
+        return sample_issues
+
+    monkeypatch.setattr(github_service, "get_repository", mock_get_repo)
+    monkeypatch.setattr(github_service, "list_repository_issues", mock_list_issues)
+
+    client.post("/api/v1/repositories", json={"owner": "acme", "name": "repo-paginate"})
+
+    # 1. Default page size (no params passed)
+    res = client.get("/api/v1/issues").json()
+    assert res["page"] == 1
+    assert res["per_page"] == 50
+    assert res["total"] == 60
+    assert res["total_pages"] == 2
+    assert len(res["items"]) == 50
+    assert res["has_next"] is True
+    assert res["has_previous"] is False
+
+    # 2. Explicit page 1
+    p1 = client.get("/api/v1/issues?page=1&per_page=50").json()
+    assert p1["page"] == 1
+    assert len(p1["items"]) == 50
+    assert p1["has_next"] is True
+    assert p1["has_previous"] is False
+
+    # 3. Explicit page 2 (final page)
+    p2 = client.get("/api/v1/issues?page=2&per_page=50").json()
+    assert p2["page"] == 2
+    assert len(p2["items"]) == 10
+    assert p2["total"] == 60
+    assert p2["total_pages"] == 2
+    assert p2["has_next"] is False
+    assert p2["has_previous"] is True
+
+    # 4. Invalid page (e.g. 0, -1 -> 422 Unprocessable Entity)
+    inv_res = client.get("/api/v1/issues?page=0")
+    assert inv_res.status_code == 422
+
+    inv_neg = client.get("/api/v1/issues?page=-5")
+    assert inv_neg.status_code == 422
+
+    # 5. Out of range page (page 999 with 2 total pages)
+    out_res = client.get("/api/v1/issues?page=999").json()
+    assert out_res["page"] == 999
+    assert out_res["items"] == []
+    assert out_res["total"] == 60
+    assert out_res["total_pages"] == 2
+    assert out_res["has_next"] is False
+    assert out_res["has_previous"] is True
+
+
+def test_repository_counts_independent_of_page_size(client: TestClient, monkeypatch):
+    """Verify repository-level issue counts remain independent of page size (e.g. total=7030, page_size=50)."""
+    cpython_issues = [
+        {
+            "id": 10000 + i,
+            "number": i,
+            "title": f"CPython Issue {i}",
+            "state": "open",
+            "html_url": f"https://github.com/python/cpython/issues/{i}",
+            "user": {"login": "coredev"},
+        }
+        for i in range(1, 51)
+    ]
+    cpython_repo = {
+        "id": 9999,
+        "name": "cpython",
+        "full_name": "python/cpython",
+        "owner": {"login": "python"},
+        "open_issues_count": 7030,
+        "default_branch": "main",
+        "private": False,
+        "html_url": "https://github.com/python/cpython",
+        "language": "Python",
+    }
+
+    async def mock_get_repo(owner, name, token=None):
+        return cpython_repo
+
+    async def mock_list_issues(owner, name, state="open", token=None):
+        return cpython_issues
+
+    async def mock_get_counts(owner, name, combined_count=0, token=None):
+        return combined_count, 0
+
+    monkeypatch.setattr(github_service, "get_repository", mock_get_repo)
+    monkeypatch.setattr(github_service, "list_repository_issues", mock_list_issues)
+    monkeypatch.setattr(github_service, "get_repository_counts", mock_get_counts)
+
+    resp = client.post("/api/v1/repositories", json={"owner": "python", "name": "cpython"})
+    repo_id = resp.json()["id"]
+
+    # Query issues for CPython
+    res = client.get(f"/api/v1/issues?repository_id={repo_id}&page=1&per_page=50").json()
+    assert len(res["items"]) == 50
+    assert res["total"] == 7030  # CRITICAL: must remain 7030, not 50!
+    assert res["total_pages"] == 141
+    assert res["has_next"] is True
+    assert res["has_previous"] is False
+
+
+def test_multiple_repositories_independent_pagination(client: TestClient, monkeypatch):
+    """Verify multiple repositories (e.g. CPython with 7030 and FastAPI with 1) have independent pagination."""
+    repos = {
+        ("python", "cpython"): {
+            "id": 101,
+            "name": "cpython",
+            "full_name": "python/cpython",
+            "owner": {"login": "python"},
+            "open_issues_count": 7030,
+            "default_branch": "main",
+            "private": False,
+            "html_url": "https://github.com/python/cpython",
+            "language": "Python",
+        },
+        ("fastapi", "fastapi"): {
+            "id": 102,
+            "name": "fastapi",
+            "full_name": "fastapi/fastapi",
+            "owner": {"login": "fastapi"},
+            "open_issues_count": 1,
+            "default_branch": "main",
+            "private": False,
+            "html_url": "https://github.com/fastapi/fastapi",
+            "language": "Python",
+        },
+    }
+
+    async def mock_get_repo(owner, name, token=None):
+        return repos[(owner, name)]
+
+    async def mock_list_issues(owner, name, state="open", token=None):
+        if name == "fastapi":
+            return [
+                {
+                    "id": 301,
+                    "number": 1,
+                    "title": "FastAPI Bug",
+                    "state": "open",
+                    "html_url": "https://github.com/fastapi/fastapi/issues/1",
+                    "user": {"login": "tiangolo"},
+                }
+            ]
+        else:
+            return [
+                {
+                    "id": 401,
+                    "number": 1,
+                    "title": "CPython Bug",
+                    "state": "open",
+                    "html_url": "https://github.com/python/cpython/issues/1",
+                    "user": {"login": "gvanrossum"},
+                }
+            ]
+
+    async def mock_get_counts(owner, name, combined_count=0, token=None):
+        return combined_count, 0
+
+    monkeypatch.setattr(github_service, "get_repository", mock_get_repo)
+    monkeypatch.setattr(github_service, "list_repository_issues", mock_list_issues)
+    monkeypatch.setattr(github_service, "get_repository_counts", mock_get_counts)
+
+    r_cpython = client.post("/api/v1/repositories", json={"owner": "python", "name": "cpython"}).json()
+    r_fastapi = client.post("/api/v1/repositories", json={"owner": "fastapi", "name": "fastapi"}).json()
+
+    # Query CPython individually
+    cpython_res = client.get(f"/api/v1/issues?repository_id={r_cpython['id']}").json()
+    assert cpython_res["total"] == 7030
+    assert cpython_res["total_pages"] == 141
+    assert len(cpython_res["items"]) == 1
+
+    # Query FastAPI individually
+    fastapi_res = client.get(f"/api/v1/issues?repository_id={r_fastapi['id']}").json()
+    assert fastapi_res["total"] == 1
+    assert fastapi_res["total_pages"] == 1
+    assert len(fastapi_res["items"]) == 1
+
+    # Query All repositories combined
+    all_res = client.get("/api/v1/issues").json()
+    assert all_res["total"] == 7031  # 7030 + 1
+    assert all_res["total_pages"] == 141

@@ -35,6 +35,13 @@ function useSearchData() {
         api.getIssues(),
         api.getAgents(),
       ]);
+      if (repoResult.status === "fulfilled") setRepositories(repoResult.value);
+      if (issueResult.status === "fulfilled") {
+        const val = issueResult.value;
+        setIssues(Array.isArray(val) ? val : val.items || []);
+      }
+      if (agentResult.status === "fulfilled") setAgents(agentResult.value);
+
       if (cancelled) return;
       if (repoResult.status === "fulfilled") setRepositories(repoResult.value);
       if (issueResult.status === "fulfilled") setIssues(issueResult.value);

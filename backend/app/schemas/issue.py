@@ -1,7 +1,7 @@
 """Pydantic schemas for issue API operations."""
 
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 from pydantic import BaseModel, ConfigDict
 
 
@@ -21,3 +21,15 @@ class IssueResponse(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class PaginatedIssueResponse(BaseModel):
+    """Paginated response schema for repository issues."""
+
+    items: List[IssueResponse]
+    page: int
+    per_page: int
+    total: int
+    total_pages: int
+    has_next: bool
+    has_previous: bool

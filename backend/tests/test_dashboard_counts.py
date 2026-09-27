@@ -9,6 +9,13 @@ def test_canonical_counts_empty_state(client):
     assert len(repos) == 0
 
     issues = client.get("/api/v1/issues").json()
+    assert issues["total"] == 0
+    assert len(issues["items"]) == 0
+
+    open_issues = client.get("/api/v1/issues?state=open").json()
+    assert open_issues["total"] == 0
+    assert len(open_issues["items"]) == 0
+
     assert len(issues) == 0
 
     open_issues = client.get("/api/v1/issues?state=open").json()
@@ -107,6 +114,22 @@ def test_open_issues_vs_total_issues_count_semantics(client, db_session, monkeyp
 
     # Total issues count
     total_issues = client.get("/api/v1/issues").json()
+    assert total_issues["total"] == 2
+    assert len(total_issues["items"]) == 2
+
+    # Open issues count
+    open_issues = client.get("/api/v1/issues?state=open").json()
+    assert open_issues["total"] == 1
+    assert len(open_issues["items"]) == 1
+    assert open_issues["items"][0]["state"] == "open"
+    assert open_issues["items"][0]["number"] == 1
+
+    # Closed issues count
+    closed_issues = client.get("/api/v1/issues?state=closed").json()
+    assert closed_issues["total"] == 1
+    assert len(closed_issues["items"]) == 1
+    assert closed_issues["items"][0]["state"] == "closed"
+    assert closed_issues["items"][0]["number"] == 2
     assert len(total_issues) == 2
 
     # Open issues count
@@ -162,6 +185,10 @@ def test_multiple_analysis_runs_count_consistency(client, monkeypatch):
     monkeypatch.setattr(github_service, "get_repository_contents", mock_get_contents)
 
     client.post("/api/v1/repositories", json={"owner": "acme", "name": "calc"})
+    issues_res = client.get("/api/v1/issues").json()
+    items = issues_res.get("items", issues_res) if isinstance(issues_res, dict) else issues_res
+    issue_id = items[0]["id"]
+
     issue_id = client.get("/api/v1/issues").json()[0]["id"]
 
     # First analysis run

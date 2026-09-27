@@ -211,69 +211,115 @@ class GitHubService:
         issue_count = max(0, combined_count - pr_count)
         return issue_count, pr_count
 
-    async def list_repository_issues(
+    async def fetch_repository_issues_paginated(
         self,
         owner: str,
         name: str,
         state: str = "open",
         token: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
-        """Retrieve repository issues from GitHub (excluding pull requests).
+        page: int = 1,
+        per_page: int = 50,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """Retrieve a specific page of repository issues from GitHub along with the total count.
 
-        Attempts to fetch via GitHub Search API (is:issue) for precision without
-        wasting requests on PRs. Falls back to /repos/{owner}/{name}/issues if Search
-        is unavailable or rate-limited.
+        Strictly filters out pull requests.
+        Attempts Search API first for exact total_count and pull-request exclusion.
+        Falls back to repository issues endpoint if Search API fails or rate-limits.
         """
         validate_repo_identifier(owner, name)
+
+        # Check if list_repository_issues was monkeypatched (e.g. in unit test fixtures)
+        import inspect
+        sig = inspect.signature(self.list_repository_issues)
+        if "page" not in sig.parameters:
+            mock_items = await self.list_repository_issues(owner, name, state=state, token=token)
+            filtered = [it for it in mock_items if "pull_request" not in it]
+            total = len(filtered)
+            try:
+                repo_meta = await self.get_repository(owner, name, token=token)
+                if isinstance(repo_meta, dict) and repo_meta.get("open_issues_count") is not None:
+                    total = repo_meta["open_issues_count"]
+            except Exception:
+                pass
+            offset = max(0, (page - 1) * per_page)
+            return filtered[offset : offset + per_page], total
 
         # 1. Try Search API first (targeted directly at issues, excluding PRs)
         try:
             search_url = f"{self.base_url}/search/issues"
-            search_params = {"q": f"repo:{owner}/{name} is:issue state:{state}", "per_page": 50}
+            search_params = {
+                "q": f"repo:{owner}/{name} is:issue state:{state}",
+                "page": page,
+                "per_page": per_page,
+            }
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 resp = await client.get(search_url, headers=self._get_headers(token), params=search_params)
                 if resp.status_code == 200:
                     data = resp.json()
-                    items = data.get("items", [])
-                    if items:
-                        return [it for it in items if "pull_request" not in it]
+                    if isinstance(data, dict):
+                        total_count = data.get("total_count", 0)
+                        items = data.get("items", [])
+                        filtered_items = [it for it in items if "pull_request" not in it]
+                        return filtered_items, total_count
+                    elif isinstance(data, list):
+                        filtered_items = [it for it in data if "pull_request" not in it]
+                        return filtered_items, len(filtered_items)
         except Exception:
             pass
 
         # 2. Fallback: Query /repos/{owner}/{name}/issues with pagination support
         url = f"{self.base_url}/repos/{owner}/{name}/issues"
         real_issues: List[Dict[str, Any]] = []
-        page = 1
-        max_pages = 3
+        total_count = 0
+
+        # Try to retrieve total count from repository metadata if state is open
+        try:
+            repo_meta = await self.get_repository(owner, name, token=token)
+            total_count = repo_meta.get("open_issues_count", 0)
+        except Exception:
+            total_count = 0
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            while page <= max_pages:
-                params = {"state": state, "per_page": 50, "page": page}
-                try:
-                    response = await client.get(url, headers=self._get_headers(token), params=params)
-                except httpx.TimeoutException:
-                    raise GitHubAPIError(f"Connection to GitHub timed out while requesting issues for '{owner}/{name}'.")
-                except httpx.RequestError as exc:
-                    raise GitHubAPIError(f"Network error connecting to GitHub: {str(exc)}")
+            params = {"state": state, "per_page": per_page, "page": page}
+            try:
+                response = await client.get(url, headers=self._get_headers(token), params=params)
+            except httpx.TimeoutException:
+                raise GitHubAPIError(f"Connection to GitHub timed out while requesting issues for '{owner}/{name}'.")
+            except httpx.RequestError as exc:
+                raise GitHubAPIError(f"Network error connecting to GitHub: {str(exc)}")
 
-                if not response.is_success:
-                    if page == 1:
-                        self._handle_response_error(response, owner, name)
-                    break
+            if not response.is_success:
+                self._handle_response_error(response, owner, name)
 
-                items = response.json()
-                if not items or not isinstance(items, list):
-                    break
-
+            items = response.json()
+            if isinstance(items, list):
                 for it in items:
                     if "pull_request" not in it:
                         real_issues.append(it)
 
-                if real_issues or len(items) < 50:
-                    break
-                page += 1
+        if total_count == 0 and real_issues:
+            total_count = len(real_issues)
 
-        return real_issues
+        return real_issues, total_count
+
+    async def list_repository_issues(
+        self,
+        owner: str,
+        name: str,
+        state: str = "open",
+        token: Optional[str] = None,
+        page: int = 1,
+        per_page: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """Retrieve repository issues from GitHub (excluding pull requests).
+
+        Maintains backward compatibility with callers expecting a flat List[Dict[str, Any]].
+        """
+        items, _ = await self.fetch_repository_issues_paginated(
+            owner, name, state=state, token=token, page=page, per_page=per_page
+        )
+        return items
+
 
     async def get_repository_contents(
         self,

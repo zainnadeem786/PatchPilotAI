@@ -38,7 +38,18 @@ export interface BackendIssue {
   updated_at: string;
 }
 
+export interface PaginatedIssueResponse {
+  items: BackendIssue[];
+  page: number;
+  per_page: number;
+  total: number;
+  total_pages: number;
+  has_next: boolean;
+  has_previous: boolean;
+}
+
 export interface BackendContentItem {
+
   name: string;
   path: string;
   type: string;

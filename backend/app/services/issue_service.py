@@ -1,12 +1,46 @@
 """Database service for issue persistence and querying."""
 
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from sqlalchemy.orm import Session
 from app.models.issue import Issue
 
 
 class IssueService:
     """Service layer managing database operations for repository issues."""
+
+    def count_issues(
+        self,
+        db: Session,
+        repository_id: Optional[int] = None,
+        state: Optional[str] = None,
+    ) -> int:
+        """Count issues in local database with optional filters."""
+        query = db.query(Issue)
+        if repository_id is not None:
+            query = query.filter(Issue.repository_id == repository_id)
+        if state is not None:
+            query = query.filter(Issue.state == state)
+        return query.count()
+
+    def list_issues_paginated(
+        self,
+        db: Session,
+        repository_id: Optional[int] = None,
+        state: Optional[str] = None,
+        page: int = 1,
+        per_page: int = 50,
+    ) -> Tuple[List[Issue], int]:
+        """Return paginated issues from local database and total matching count."""
+        query = db.query(Issue)
+        if repository_id is not None:
+            query = query.filter(Issue.repository_id == repository_id)
+        if state is not None:
+            query = query.filter(Issue.state == state)
+
+        total = query.count()
+        offset = max(0, (page - 1) * per_page)
+        items = query.order_by(Issue.number.desc()).offset(offset).limit(per_page).all()
+        return items, total
 
     def list_issues(
         self,
@@ -26,6 +60,7 @@ class IssueService:
             query = query.filter(Issue.state == state)
 
         return query.order_by(Issue.number.desc()).offset(skip).limit(limit).all()
+
 
     def get_issue(
         self,
