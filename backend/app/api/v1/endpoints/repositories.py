@@ -1,12 +1,12 @@
 """API endpoints for repository operations under /api/v1/repositories."""
 
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.schemas.repository import RepositoryConnectRequest, RepositoryResponse
-from app.schemas.issue import IssueResponse
+from app.schemas.issue import IssueResponse, PaginatedIssueResponse
 from app.services.repository_service import repository_service
 from app.services.issue_service import issue_service
 from app.services.github_service import (
@@ -130,12 +130,15 @@ def get_repository(
 
 @router.get(
     "/{repository_id}/issues",
-    response_model=List[IssueResponse],
+    response_model=PaginatedIssueResponse,
     summary="List issues for a repository",
-    description="Retrieve all tracked issues for a specific repository.",
+    description="Retrieve all tracked issues for a specific repository with pagination.",
 )
-def list_repository_issues(
+async def list_repository_issues(
     repository_id: int,
+    page: int = Query(1, ge=1, description="Page number (1-indexed)"),
+    per_page: int = Query(50, ge=1, le=100, description="Maximum number of issues per page"),
+    state: Optional[str] = Query(None, description="Filter issues by state: 'open' or 'closed'"),
     db: Session = Depends(get_db),
 ):
     repo = repository_service.get_repository(db, repository_id)
@@ -144,7 +147,15 @@ def list_repository_issues(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Repository with ID {repository_id} was not found.",
         )
-    return issue_service.list_issues(db, repository_id=repository_id)
+    from app.api.v1.endpoints.issues import list_issues
+    return await list_issues(
+        page=page,
+        per_page=per_page,
+        state=state,
+        repository_id=repository_id,
+        db=db,
+    )
+
 
 
 @router.get(

@@ -9,10 +9,13 @@ def test_canonical_counts_empty_state(client):
     assert len(repos) == 0
 
     issues = client.get("/api/v1/issues").json()
-    assert len(issues) == 0
+    assert issues["total"] == 0
+    assert len(issues["items"]) == 0
 
     open_issues = client.get("/api/v1/issues?state=open").json()
-    assert len(open_issues) == 0
+    assert open_issues["total"] == 0
+    assert len(open_issues["items"]) == 0
+
 
     agents = client.get("/api/v1/agents").json()
     assert len(agents) == 6
@@ -107,19 +110,22 @@ def test_open_issues_vs_total_issues_count_semantics(client, db_session, monkeyp
 
     # Total issues count
     total_issues = client.get("/api/v1/issues").json()
-    assert len(total_issues) == 2
+    assert total_issues["total"] == 2
+    assert len(total_issues["items"]) == 2
 
     # Open issues count
     open_issues = client.get("/api/v1/issues?state=open").json()
-    assert len(open_issues) == 1
-    assert open_issues[0]["state"] == "open"
-    assert open_issues[0]["number"] == 1
+    assert open_issues["total"] == 1
+    assert len(open_issues["items"]) == 1
+    assert open_issues["items"][0]["state"] == "open"
+    assert open_issues["items"][0]["number"] == 1
 
     # Closed issues count
     closed_issues = client.get("/api/v1/issues?state=closed").json()
-    assert len(closed_issues) == 1
-    assert closed_issues[0]["state"] == "closed"
-    assert closed_issues[0]["number"] == 2
+    assert closed_issues["total"] == 1
+    assert len(closed_issues["items"]) == 1
+    assert closed_issues["items"][0]["state"] == "closed"
+    assert closed_issues["items"][0]["number"] == 2
 
 
 def test_multiple_analysis_runs_count_consistency(client, monkeypatch):
@@ -162,7 +168,10 @@ def test_multiple_analysis_runs_count_consistency(client, monkeypatch):
     monkeypatch.setattr(github_service, "get_repository_contents", mock_get_contents)
 
     client.post("/api/v1/repositories", json={"owner": "acme", "name": "calc"})
-    issue_id = client.get("/api/v1/issues").json()[0]["id"]
+    issues_res = client.get("/api/v1/issues").json()
+    items = issues_res.get("items", issues_res) if isinstance(issues_res, dict) else issues_res
+    issue_id = items[0]["id"]
+
 
     # First analysis run
     run1 = client.post(f"/api/v1/issues/{issue_id}/analyze")

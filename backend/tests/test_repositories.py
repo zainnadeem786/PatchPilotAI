@@ -175,6 +175,6 @@ def test_connect_repository_separates_issues_and_prs(client: TestClient, monkeyp
     issues_res = client.get(f"/api/v1/repositories/{repo_id}/issues")
     assert issues_res.status_code == 200
     issues = issues_res.json()
-    assert len(issues) == 1
-    assert issues[0]["number"] == 10370
-
+    items = issues.get("items", issues) if isinstance(issues, dict) else issues
+    assert len(items) == 1
+    assert items[0]["number"] == 10370

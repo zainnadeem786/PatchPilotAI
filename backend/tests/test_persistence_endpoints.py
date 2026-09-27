@@ -33,7 +33,9 @@ def _connect_and_analyze(client, monkeypatch):
     monkeypatch.setattr(github_service, "get_repository_contents", mock_get_contents)
 
     client.post("/api/v1/repositories", json={"owner": "acme", "name": "widget"})
-    issue_id = client.get("/api/v1/issues").json()[0]["id"]
+    res = client.get("/api/v1/issues").json()
+    items = res.get("items", res) if isinstance(res, dict) else res
+    issue_id = items[0]["id"]
 
     response = client.post(f"/api/v1/issues/{issue_id}/analyze")
     assert response.status_code == 200

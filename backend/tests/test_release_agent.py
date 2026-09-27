@@ -476,7 +476,9 @@ def test_analyze_endpoint_returns_six_agents(client, monkeypatch):
     monkeypatch.setattr(github_service, "get_repository_contents", mock_get_contents)
 
     client.post("/api/v1/repositories", json={"owner": "acme", "name": "widget"})
-    issue_id = client.get("/api/v1/issues").json()[0]["id"]
+    issues_res = client.get("/api/v1/issues").json()
+    items = issues_res.get("items", issues_res) if isinstance(issues_res, dict) else issues_res
+    issue_id = items[0]["id"]
 
     response = client.post(f"/api/v1/issues/{issue_id}/analyze")
     assert response.status_code == 200

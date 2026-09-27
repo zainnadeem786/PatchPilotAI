@@ -4,6 +4,7 @@ import {
   HealthResponse,
   BackendRepository,
   BackendIssue,
+  PaginatedIssueResponse,
   BackendContentItem,
   EngineResultResponse,
   AgentRegistryEntry,
@@ -124,19 +125,43 @@ export class ApiClient {
   }
 
   /**
-   * List all issues or filter by repository and state.
+   * List issues with server-side pagination and filters.
    * Calls GET /api/v1/issues
    */
   async getIssues(
-    repositoryId?: number | string,
-    state?: string,
-  ): Promise<BackendIssue[]> {
+    optionsOrRepoId?:
+      | number
+      | string
+      | {
+          repositoryId?: number | string;
+          state?: string;
+          page?: number;
+          per_page?: number;
+        },
+    maybeState?: string,
+  ): Promise<PaginatedIssueResponse> {
     const params = new URLSearchParams();
-    if (repositoryId !== undefined && repositoryId !== null) {
-      params.append("repository_id", String(repositoryId));
-    }
-    if (state) {
-      params.append("state", state);
+
+    if (optionsOrRepoId !== undefined && optionsOrRepoId !== null) {
+      if (typeof optionsOrRepoId === "object") {
+        if (optionsOrRepoId.repositoryId !== undefined && optionsOrRepoId.repositoryId !== null) {
+          params.append("repository_id", String(optionsOrRepoId.repositoryId));
+        }
+        if (optionsOrRepoId.state) {
+          params.append("state", optionsOrRepoId.state);
+        }
+        if (optionsOrRepoId.page !== undefined) {
+          params.append("page", String(optionsOrRepoId.page));
+        }
+        if (optionsOrRepoId.per_page !== undefined) {
+          params.append("per_page", String(optionsOrRepoId.per_page));
+        }
+      } else {
+        params.append("repository_id", String(optionsOrRepoId));
+        if (maybeState) {
+          params.append("state", maybeState);
+        }
+      }
     }
 
     const queryStr = params.toString() ? `?${params.toString()}` : "";
@@ -154,6 +179,7 @@ export class ApiClient {
 
     return response.json();
   }
+
 
   /**
    * Retrieve a specific issue by ID.
