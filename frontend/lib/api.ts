@@ -1,6 +1,19 @@
 /** API client abstraction for PatchPilot */
 
-import { HealthResponse } from "@/types/api";
+import {
+  HealthResponse,
+  BackendRepository,
+  BackendIssue,
+  PaginatedIssueResponse,
+  BackendContentItem,
+  EngineResultResponse,
+  AgentRegistryEntry,
+  PatchResponse,
+  RegressionTestResponse,
+  SecurityFindingResponse,
+  ReleaseReadinessResponse,
+  ValidationRunResponse,
+} from "@/types/api";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "") || "http://localhost:8000";
@@ -20,17 +33,361 @@ export class ApiClient {
     const url = `${this.baseUrl}/api/health`;
     const response = await fetch(url, {
       method: "GET",
-      headers: {
-        Accept: "application/json",
-      },
-      // Cache: no-store ensures fresh checks
+      headers: { Accept: "application/json" },
       cache: "no-store",
     });
 
     if (!response.ok) {
-      throw new Error(
-        `Backend health check failed with HTTP ${response.status}: ${response.statusText}`
-      );
+      throw new Error(`Backend health check failed with HTTP ${response.status}`);
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Safe check whether the backend is online without throwing unhandled exceptions.
+   */
+  async isBackendAvailable(): Promise<boolean> {
+    try {
+      await this.checkHealth();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * List all tracked repositories.
+   * Calls GET /api/v1/repositories
+   */
+  async getRepositories(): Promise<BackendRepository[]> {
+    const url = `${this.baseUrl}/api/v1/repositories`;
+    const response = await fetch(url, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(`Failed to load repositories (HTTP ${response.status}): ${errorBody}`);
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Retrieve a specific repository by ID.
+   * Calls GET /api/v1/repositories/{id}
+   */
+  async getRepository(id: number | string): Promise<BackendRepository> {
+    const url = `${this.baseUrl}/api/v1/repositories/${id}`;
+    const response = await fetch(url, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      throw new Error(`Repository #${id} not found or failed (HTTP ${response.status})`);
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Connect a new GitHub repository to PatchPilot.
+   * Calls POST /api/v1/repositories
+   */
+  async connectRepository(owner: string, name: string): Promise<BackendRepository> {
+    const url = `${this.baseUrl}/api/v1/repositories`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({ owner, name }),
+    });
+
+    if (!response.ok) {
+      let detail = `HTTP ${response.status}`;
+      try {
+        const errorJson = await response.json();
+        detail = errorJson.detail || detail;
+      } catch {
+        detail = await response.text() || detail;
+      }
+      throw new Error(detail);
+    }
+
+    return response.json();
+  }
+
+  /**
+   * List issues with server-side pagination and filters.
+   * Calls GET /api/v1/issues
+   */
+  async getIssues(
+    optionsOrRepoId?:
+      | number
+      | string
+      | {
+          repositoryId?: number | string;
+          state?: string;
+          page?: number;
+          per_page?: number;
+        },
+    maybeState?: string,
+  ): Promise<PaginatedIssueResponse> {
+    const params = new URLSearchParams();
+
+    if (optionsOrRepoId !== undefined && optionsOrRepoId !== null) {
+      if (typeof optionsOrRepoId === "object") {
+        if (optionsOrRepoId.repositoryId !== undefined && optionsOrRepoId.repositoryId !== null) {
+          params.append("repository_id", String(optionsOrRepoId.repositoryId));
+        }
+        if (optionsOrRepoId.state) {
+          params.append("state", optionsOrRepoId.state);
+        }
+        if (optionsOrRepoId.page !== undefined) {
+          params.append("page", String(optionsOrRepoId.page));
+        }
+        if (optionsOrRepoId.per_page !== undefined) {
+          params.append("per_page", String(optionsOrRepoId.per_page));
+        }
+      } else {
+        params.append("repository_id", String(optionsOrRepoId));
+        if (maybeState) {
+          params.append("state", maybeState);
+        }
+      }
+    }
+
+    const queryStr = params.toString() ? `?${params.toString()}` : "";
+    const url = `${this.baseUrl}/api/v1/issues${queryStr}`;
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to load issues (HTTP ${response.status})`);
+    }
+
+    return response.json();
+  }
+
+
+  /**
+   * Retrieve a specific issue by ID.
+   * Calls GET /api/v1/issues/{id}
+   */
+  async getIssue(id: number | string): Promise<BackendIssue> {
+    const url = `${this.baseUrl}/api/v1/issues/${id}`;
+    const response = await fetch(url, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      throw new Error(`Issue #${id} not found (HTTP ${response.status})`);
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Browse repository directory contents.
+   * Calls GET /api/v1/repositories/{id}/contents
+   */
+  async getRepositoryContents(
+    repositoryId: number | string,
+    path: string = "",
+  ): Promise<BackendContentItem[]> {
+    const param = path ? `?path=${encodeURIComponent(path)}` : "";
+    const url = `${this.baseUrl}/api/v1/repositories/${repositoryId}/contents${param}`;
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to load contents (HTTP ${response.status})`);
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Retrieve the canonical ordered list of registered pipeline agents.
+   * Calls GET /api/v1/agents
+   * This is the single source of truth for agent count and metadata.
+   */
+  async getAgents(): Promise<AgentRegistryEntry[]> {
+    const url = `${this.baseUrl}/api/v1/agents`;
+    const response = await fetch(url, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to load agent registry (HTTP ${response.status})`);
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Run the Phase 4/5 AI Agent Engine pipeline for a tracked issue.
+   * Calls POST /api/v1/issues/{id}/analyze
+   */
+  async analyzeIssue(id: number | string): Promise<EngineResultResponse> {
+    const url = `${this.baseUrl}/api/v1/issues/${id}/analyze`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { Accept: "application/json" },
+    });
+
+    if (!response.ok) {
+      let detail = `HTTP ${response.status}`;
+      try {
+        const errorJson = await response.json();
+        detail = errorJson.detail || detail;
+      } catch {
+        detail = (await response.text()) || detail;
+      }
+      throw new Error(detail);
+    }
+
+    return response.json();
+  }
+
+  // ── Phase 6 — Persisted agent-artifact endpoints ───────────────────────────
+
+  private async getList<T>(path: string, repositoryId?: number | string, issueId?: number | string): Promise<T[]> {
+    const params = new URLSearchParams();
+    if (repositoryId !== undefined && repositoryId !== null) params.append("repository_id", String(repositoryId));
+    if (issueId !== undefined && issueId !== null) params.append("issue_id", String(issueId));
+    const queryStr = params.toString() ? `?${params.toString()}` : "";
+    const url = `${this.baseUrl}${path}${queryStr}`;
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to load ${path} (HTTP ${response.status})`);
+    }
+
+    return response.json();
+  }
+
+  private async getDetail<T>(path: string, id: number | string): Promise<T> {
+    const url = `${this.baseUrl}${path}/${id}`;
+    const response = await fetch(url, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      throw new Error(`${path}/${id} not found or failed (HTTP ${response.status})`);
+    }
+
+    return response.json();
+  }
+
+  /** Calls GET /api/v1/patches */
+  async getPatches(repositoryId?: number | string, issueId?: number | string): Promise<PatchResponse[]> {
+    return this.getList<PatchResponse>("/api/v1/patches", repositoryId, issueId);
+  }
+
+  /** Calls GET /api/v1/patches/{id} */
+  async getPatch(id: number | string): Promise<PatchResponse> {
+    return this.getDetail<PatchResponse>("/api/v1/patches", id);
+  }
+
+  /** Calls GET /api/v1/tests */
+  async getRegressionTests(repositoryId?: number | string, issueId?: number | string): Promise<RegressionTestResponse[]> {
+    return this.getList<RegressionTestResponse>("/api/v1/tests", repositoryId, issueId);
+  }
+
+  /** Calls GET /api/v1/tests/{id} */
+  async getRegressionTest(id: number | string): Promise<RegressionTestResponse> {
+    return this.getDetail<RegressionTestResponse>("/api/v1/tests", id);
+  }
+
+  /** Calls GET /api/v1/security */
+  async getSecurityFindings(repositoryId?: number | string, issueId?: number | string): Promise<SecurityFindingResponse[]> {
+    return this.getList<SecurityFindingResponse>("/api/v1/security", repositoryId, issueId);
+  }
+
+  /** Calls GET /api/v1/security/{id} */
+  async getSecurityFinding(id: number | string): Promise<SecurityFindingResponse> {
+    return this.getDetail<SecurityFindingResponse>("/api/v1/security", id);
+  }
+
+  /** Calls GET /api/v1/releases */
+  async getReleases(repositoryId?: number | string, issueId?: number | string): Promise<ReleaseReadinessResponse[]> {
+    return this.getList<ReleaseReadinessResponse>("/api/v1/releases", repositoryId, issueId);
+  }
+
+  /** Calls GET /api/v1/releases/{id} */
+  async getRelease(id: number | string): Promise<ReleaseReadinessResponse> {
+    return this.getDetail<ReleaseReadinessResponse>("/api/v1/releases", id);
+  }
+
+  /** Calls GET /api/v1/validation */
+  async getValidationRuns(
+    repositoryId?: number | string,
+    issueId?: number | string,
+    analysisRunId?: number | string
+  ): Promise<ValidationRunResponse[]> {
+    const params = new URLSearchParams();
+    if (repositoryId !== undefined && repositoryId !== null) params.append("repository_id", String(repositoryId));
+    if (issueId !== undefined && issueId !== null) params.append("issue_id", String(issueId));
+    if (analysisRunId !== undefined && analysisRunId !== null) params.append("analysis_run_id", String(analysisRunId));
+    const queryStr = params.toString() ? `?${params.toString()}` : "";
+    const url = `${this.baseUrl}/api/v1/validation${queryStr}`;
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to load validation runs (HTTP ${response.status})`);
+    }
+
+    return response.json();
+  }
+
+  /** Calls GET /api/v1/validation/{id} */
+  async getValidationRun(id: number | string): Promise<ValidationRunResponse> {
+    return this.getDetail<ValidationRunResponse>("/api/v1/validation", id);
+  }
+
+  /** Calls POST /api/v1/analysis/{analysis_id}/validate */
+  async validateAnalysis(analysisId: number | string): Promise<ValidationRunResponse> {
+    const url = `${this.baseUrl}/api/v1/analysis/${analysisId}/validate`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { Accept: "application/json" },
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(`Validation failed (HTTP ${response.status}): ${errorBody}`);
     }
 
     return response.json();
