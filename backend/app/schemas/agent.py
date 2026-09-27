@@ -37,5 +37,6 @@ class EngineResultResponse(BaseModel):
     issue_id: Optional[int] = None
     results: List[AgentResultResponse]
     roadmap: List[str] = []
+    validation: Optional[Dict[str, Any]] = None
 
     model_config = ConfigDict(from_attributes=True)

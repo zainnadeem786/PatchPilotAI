@@ -310,7 +310,7 @@ class GitHubService:
 
         Raises GitHubConfigurationError if GITHUB_CLIENT_ID is not set.
         """
-        if not settings.GITHUB_CLIENT_ID:
+        if not settings.github_configured:
             raise GitHubConfigurationError(
                 "GitHub OAuth is not configured. Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET in environment."
             )

@@ -44,6 +44,7 @@ class AnalysisRun(Base):
     release_readiness = relationship(
         "ReleaseReadiness", back_populates="analysis_run", cascade="all, delete-orphan", uselist=False
     )
+    validation_runs = relationship("ValidationRun", back_populates="analysis_run", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<AnalysisRun(id={self.id}, repository_id={self.repository_id}, issue_id={self.issue_id})>"

@@ -17,84 +17,20 @@ import {
   CloseIcon,
   ShieldIcon,
 } from "@/components/icons";
-import { api } from "@/lib/api";
+import { usePlatformStats, PlatformStats } from "@/context/PlatformStatsContext";
 
 // ── Sidebar statistics ────────────────────────────────────────────────────────
 //
-// Every count below comes from a real backend endpoint, fetched once on
-// mount. A stat is `null` while loading or if its request failed — the UI
-// renders "…" (loading) rather than ever fabricating a number.
+// Every count comes from the canonical shared PlatformStatsContext,
+// synchronized in real time with backend PostgreSQL records:
 //
 //   repositoryCount — GET /api/v1/repositories
-//   issueCount      — GET /api/v1/issues
+//   openIssueCount  — GET /api/v1/issues (filtered to open issues for active triage)
 //   agentCount      — GET /api/v1/agents (canonical registry)
 //   patchCount      — GET /api/v1/patches
 //   testCount       — GET /api/v1/tests
 //   securityCount   — GET /api/v1/security
 //   releaseCount    — GET /api/v1/releases
-
-interface SidebarStats {
-  repositoryCount: number | null; // null = still loading or failed
-  issueCount: number | null;
-  agentCount: number | null;
-  patchCount: number | null;
-  testCount: number | null;
-  securityCount: number | null;
-  releaseCount: number | null;
-}
-
-/**
- * Fetches every sidebar count from the real backend API once on mount.
- * Returns null for a stat if the request is still in flight or failed.
- * Never falls back to mock values.
- */
-function useSidebarStats(): SidebarStats {
-  const [stats, setStats] = useState<SidebarStats>({
-    repositoryCount: null,
-    issueCount: null,
-    agentCount: null,
-    patchCount: null,
-    testCount: null,
-    securityCount: null,
-    releaseCount: null,
-  });
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function fetchStats() {
-      const [repoResult, issueResult, agentResult, patchResult, testResult, securityResult, releaseResult] =
-        await Promise.allSettled([
-          api.getRepositories(),
-          api.getIssues(),
-          api.getAgents(),
-          api.getPatches(),
-          api.getRegressionTests(),
-          api.getSecurityFindings(),
-          api.getReleases(),
-        ]);
-
-      if (cancelled) return;
-
-      setStats({
-        repositoryCount: repoResult.status === "fulfilled" ? repoResult.value.length : null,
-        issueCount: issueResult.status === "fulfilled" ? issueResult.value.length : null,
-        agentCount: agentResult.status === "fulfilled" ? agentResult.value.length : null,
-        patchCount: patchResult.status === "fulfilled" ? patchResult.value.length : null,
-        testCount: testResult.status === "fulfilled" ? testResult.value.length : null,
-        securityCount: securityResult.status === "fulfilled" ? securityResult.value.length : null,
-        releaseCount: releaseResult.status === "fulfilled" ? releaseResult.value.length : null,
-      });
-    }
-
-    fetchStats();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return stats;
-}
 
 // ── Navigation item type ──────────────────────────────────────────────────────
 
@@ -107,8 +43,16 @@ interface NavItem {
 }
 
 /** Builds the main nav list with live badge values injected. */
-function buildMainNav(stats: SidebarStats): NavItem[] {
-  const { repositoryCount, issueCount, agentCount, patchCount, testCount, securityCount, releaseCount } = stats;
+function buildMainNav(stats: PlatformStats): NavItem[] {
+  const {
+    repositoryCount,
+    openIssueCount,
+    agentCount,
+    patchCount,
+    testCount,
+    securityCount,
+    releaseCount,
+  } = stats;
 
   return [
     {
@@ -128,7 +72,8 @@ function buildMainNav(stats: SidebarStats): NavItem[] {
       name: "Issues",
       href: "/issues",
       icon: IssueIcon,
-      badge: issueCount === null ? "…" : String(issueCount),
+      // Semantically aligns with Overview's "Open Issues" (active triage count).
+      badge: openIssueCount === null ? "…" : String(openIssueCount),
     },
     {
       name: "Agents",
@@ -178,7 +123,7 @@ export interface SidebarProps {
 
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
   const pathname = usePathname();
-  const stats = useSidebarStats();
+  const { stats } = usePlatformStats();
   const mainNav = buildMainNav(stats);
 
   const isLinkActive = (href: string) => {

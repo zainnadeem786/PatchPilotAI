@@ -8,6 +8,7 @@ from app.models.patch import Patch
 from app.models.regression_test import RegressionTest
 from app.models.security_finding import SecurityFinding
 from app.models.release_readiness import ReleaseReadiness
+from app.models.validation_run import ValidationRun
 
 __all__ = [
     "Base",
@@ -18,4 +19,5 @@ __all__ = [
     "RegressionTest",
     "SecurityFinding",
     "ReleaseReadiness",
+    "ValidationRun",
 ]

@@ -143,6 +143,8 @@ GitHub's repository metadata endpoint reports a combined `open_issues_count` tha
 ### Alembic Migrations (`backend/alembic/versions/`)
 * **`0001_initial_repositories_issues.py`**: Creates `repositories` and `issues` tables, indices, and foreign key cascades.
 * **`0002_add_open_pull_requests_count.py`**: Adds `open_pull_requests_count` integer column to `repositories`.
+* **`0003_add_phase6_agent_artifacts.py`**: Adds `analysis_runs`, `patches`, `regression_tests`, `security_findings`, and `release_readiness` tables.
+* **`0004_add_validation_runs.py`**: Adds `validation_runs` table tracking isolated Docker test execution.
 
 To apply migrations:
 ```powershell
@@ -150,6 +152,24 @@ To apply migrations:
 ```
 
 ---
+
+## 🔒 Phase 7 — Isolated Patch Validation Sandbox
+
+PatchPilot uses a **dedicated sandbox Docker image** (`patchpilot-sandbox:python3.13`) for running generated regression tests and patches.
+
+### Security Guarantees
+* **Isolated from Application Container**: The sandbox image contains only minimal test tooling (`python:3.13-slim` + `pytest 8.3.3`) and contains zero application code (`FastAPI`, `Alembic`) or database connectors.
+* **No Host Code Execution**: Generated patches and tests execute exclusively inside ephemeral, resource-bounded Docker containers mounted only to a temporary workspace (`tempfile.mkdtemp`).
+* **Network Isolation**: All test executions run with `--network none`. The container cannot connect to GitHub, LLM providers, internal databases, or internet hosts.
+* **Zero Secrets**: No backend environment variables or secrets (`OPENAI_API_KEY`, `GITHUB_TOKEN`, `DATABASE_URL`) are forwarded into the container. Secret files (`.env`, `*.pem`, `*.key`) are filtered from the workspace.
+* **Resource Limits & Timeouts**: Ephemeral containers are constrained to `--memory=512m`, `--cpus=1.0`, `--security-opt no-new-privileges`, `--cap-drop ALL`, and a hard 60-second execution timeout.
+* **Production Deployment Note**: Production deployment requires a runtime capable of executing isolated containers. Standard Render web services do not support nested Docker execution; when container execution is unavailable in production, the service safely reports `validation_unavailable` without crashing or falsely passing.
+
+### Building the Sandbox Image Locally
+```bash
+docker build -t patchpilot-sandbox:python3.13 -t patchpilot-sandbox:latest backend/validation
+```
+
 
 ## 🧪 Testing Suite
 

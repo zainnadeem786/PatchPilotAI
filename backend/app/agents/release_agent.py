@@ -212,7 +212,69 @@ class ReleaseAgent(BaseAgent):
                 "Security analysis used static regex heuristics only — not a full security audit."
             )
 
-        # ── 5. Derive overall readiness ───────────────────────────────────────
+        # ── 5. Isolated validation readiness ──────────────────────────────────
+        val = getattr(context, "validation_result", None)
+        if val is not None:
+            val_status = getattr(val, "status", None) if not isinstance(val, dict) else val.get("status")
+            val_exit_code = getattr(val, "exit_code", None) if not isinstance(val, dict) else val.get("exit_code")
+            val_summary = getattr(val, "summary", "") if not isinstance(val, dict) else val.get("summary", "")
+            val_failure = getattr(val, "failure_reason", None) if not isinstance(val, dict) else val.get("failure_reason")
+
+            if val_status == "passed":
+                checks.append(AgentFinding(
+                    title="Validation — passed",
+                    detail=f"Isolated container validation passed successfully (exit code 0). {val_summary or 'All tests passed.'}",
+                    severity="info",
+                    category="validation",
+                ))
+            elif val_status == "failed":
+                blocking.append(
+                    f"Validation failed with exit code {val_exit_code}. {val_failure or val_summary}"
+                )
+                checks.append(AgentFinding(
+                    title="Validation — failed",
+                    detail=f"Validation tests failed inside isolated container (exit code {val_exit_code}). {val_failure or val_summary}",
+                    severity="high",
+                    category="validation",
+                ))
+            elif val_status == "timeout":
+                blocking.append(
+                    f"Validation timed out. {val_failure or val_summary or 'Execution exceeded timeout limit.'}"
+                )
+                checks.append(AgentFinding(
+                    title="Validation — timeout",
+                    detail=f"Validation timed out inside container. {val_failure or val_summary}",
+                    severity="high",
+                    category="validation",
+                ))
+            elif val_status in ("validation_unavailable", "unavailable"):
+                blocking.append("Validation could not be completed safely.")
+                checks.append(AgentFinding(
+                    title="Validation — unavailable",
+                    detail=f"Validation could not be completed safely. No host-side execution was attempted. {val_failure or ''}".strip(),
+                    severity="high",
+                    category="validation",
+                ))
+            elif val_status == "setup_failed":
+                blocking.append(
+                    f"Validation setup failed: {val_failure or 'Workspace preparation or patch application failed.'}"
+                )
+                checks.append(AgentFinding(
+                    title="Validation — setup failed",
+                    detail=f"Failed to prepare isolated workspace or apply patch: {val_failure or 'Setup failed.'}",
+                    severity="high",
+                    category="validation",
+                ))
+            else:
+                blocking.append(f"Validation status unknown: {val_status}.")
+                checks.append(AgentFinding(
+                    title="Validation — unknown status",
+                    detail=f"Validation returned unexpected status '{val_status}'.",
+                    severity="high",
+                    category="validation",
+                ))
+
+        # ── 6. Derive overall readiness ───────────────────────────────────────
 
         release_ready = len(blocking) == 0
 
@@ -243,6 +305,8 @@ class ReleaseAgent(BaseAgent):
             category="release",
         ))
 
+        val_data = val.to_dict() if hasattr(val, "to_dict") else (val if isinstance(val, dict) else None)
+
         return AgentResult(
             agent_name=self.name,
             status="success",
@@ -254,6 +318,7 @@ class ReleaseAgent(BaseAgent):
                 "status": status_label,
                 "blocking_reasons": blocking,
                 "warnings": warnings,
+                "validation": val_data,
             },
         )
 

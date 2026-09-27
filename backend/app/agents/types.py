@@ -83,6 +83,7 @@ class AgentContext:
     repository_snippets: Dict[str, str] = field(default_factory=dict)
     previous_results: Dict[str, AgentResult] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    validation_result: Optional[Any] = None
 
 
 @dataclass
@@ -93,3 +94,4 @@ class EngineResult:
     issue_id: Optional[int]
     results: List[AgentResult] = field(default_factory=list)
     roadmap: List[str] = field(default_factory=list)
+    validation: Optional[Dict[str, Any]] = None

@@ -81,6 +81,7 @@ export interface EngineResultResponse {
   issue_id?: number | null;
   results: AgentResultResponse[];
   roadmap: string[];
+  validation?: ValidationRunResponse | null;
 }
 
 // ── Agent registry (GET /api/v1/agents) ──────────────────────────────────────
@@ -173,4 +174,22 @@ export interface ReleaseReadinessResponse {
   gate_checks: Array<{ title: string; detail: string; severity: string; category?: string | null }>;
   human_approval_required: boolean;
   created_at: string;
+}
+
+export interface ValidationRunResponse {
+  id?: number | null;
+  analysis_run_id: number;
+  repository_id: number;
+  issue_id?: number | null;
+  /** "passed" | "failed" | "timeout" | "validation_unavailable" | "setup_failed" */
+  status: string;
+  tests_run: boolean;
+  exit_code?: number | null;
+  stdout?: string | null;
+  stderr?: string | null;
+  duration_ms: number;
+  summary?: string | null;
+  failure_reason?: string | null;
+  executed_command?: string | null;
+  created_at?: string | null;
 }

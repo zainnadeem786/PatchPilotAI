@@ -40,6 +40,10 @@ export const ConnectRepoModal: React.FC<ConnectRepoModalProps> = ({
       setSuccessRepo(repo);
       setIsSubmitting(false);
 
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("patchpilot:refresh-stats"));
+      }
+
       if (onSuccess) {
         onSuccess(repo);
       }

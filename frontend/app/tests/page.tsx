@@ -43,6 +43,7 @@ export default function TestsPage() {
   }, [fetchTests]);
 
   const generatedCount = tests.filter((t) => t.status === "Generated").length;
+  const executedCount = tests.filter((t) => t.execution_status && t.execution_status.startsWith("Executed")).length;
 
   return (
     <div className="space-y-6">
@@ -61,8 +62,7 @@ export default function TestsPage() {
             )}
           </div>
           <p className="text-xs text-charcoal-600 dark:text-slate-400 mt-1">
-            PatchPilot-generated regression test artifacts. These are the Regression Test Synthesis
-            Agent&apos;s own outputs — not backend pytest suite results.
+            PatchPilot-generated regression test artifacts and isolated Docker sandbox validation runs.
           </p>
         </div>
       </div>
@@ -79,9 +79,9 @@ export default function TestsPage() {
             <div className="text-2xl font-bold text-indigo-700 dark:text-indigo-300 mt-1">{generatedCount}</div>
           </div>
           <div className="rounded-lg border border-cream-300 dark:border-slate-800 bg-cream-100/90 dark:bg-slate-900/60 p-4 font-mono shadow-xs">
-            <span className="text-xs text-amber-600 dark:text-amber-400 uppercase">Executed</span>
-            <div className="text-2xl font-bold text-charcoal-900 dark:text-slate-100 mt-1">0</div>
-            <span className="text-[11px] text-charcoal-500 dark:text-slate-500">PatchPilot never runs generated tests</span>
+            <span className="text-xs text-emerald-600 dark:text-emerald-400 uppercase">Sandbox Executed</span>
+            <div className="text-2xl font-bold text-charcoal-900 dark:text-slate-100 mt-1">{executedCount}</div>
+            <span className="text-[11px] text-charcoal-500 dark:text-slate-500">Isolated container validation</span>
           </div>
         </div>
       )}
@@ -175,15 +175,47 @@ export default function TestsPage() {
                   </div>
                   <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
                     <span className="text-[10px] font-mono uppercase text-charcoal-400 dark:text-slate-500">{t.mode}</span>
-                    <Badge variant={t.status === "Generated" ? "info" : "neutral"} size="sm">{t.status}</Badge>
+                    <Badge
+                      variant={
+                        t.execution_status === "Executed — Passed"
+                          ? "success"
+                          : t.execution_status === "Executed — Failed"
+                          ? "error"
+                          : t.execution_status === "Execution Timeout"
+                          ? "warning"
+                          : t.status === "Generated"
+                          ? "info"
+                          : "neutral"
+                      }
+                      size="sm"
+                    >
+                      {t.execution_status || t.status}
+                    </Badge>
                   </div>
                 </button>
 
                 {isExpanded && (
                   <div className="p-4 border-t border-cream-300 dark:border-slate-800/80 bg-cream-200/30 dark:bg-slate-950/60 space-y-3">
-                    <div className="flex items-start gap-2 p-2.5 rounded border border-sky-200 dark:border-sky-500/30 bg-sky-50/60 dark:bg-sky-950/20 text-[11px] font-mono text-sky-800 dark:text-sky-300">
-                      <ClockIcon className="w-3.5 h-3.5 shrink-0 mt-0.5 text-sky-600 dark:text-sky-400" />
-                      <span><strong>{t.execution_status}.</strong> This test has not been run by PatchPilot.</span>
+                    <div className={`flex items-start gap-2 p-2.5 rounded border text-[11px] font-mono ${
+                      t.execution_status === "Executed — Passed"
+                        ? "border-emerald-200 dark:border-emerald-500/30 bg-emerald-50/60 dark:bg-emerald-950/20 text-emerald-800 dark:text-emerald-300"
+                        : t.execution_status === "Executed — Failed"
+                        ? "border-rose-200 dark:border-rose-500/30 bg-rose-50/60 dark:bg-rose-950/20 text-rose-800 dark:text-rose-300"
+                        : t.execution_status === "Execution Timeout"
+                        ? "border-amber-200 dark:border-amber-500/30 bg-amber-50/60 dark:bg-amber-950/20 text-amber-800 dark:text-amber-300"
+                        : "border-sky-200 dark:border-sky-500/30 bg-sky-50/60 dark:bg-sky-950/20 text-sky-800 dark:text-sky-300"
+                    }`}>
+                      <ClockIcon className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                      <span>
+                        <strong>{t.execution_status || "Generated — Not Executed"}.</strong>{" "}
+                        {t.execution_status === "Executed — Passed"
+                          ? "Validated inside isolated Docker sandbox: all tests passed."
+                          : t.execution_status === "Executed — Failed"
+                          ? "Executed inside isolated Docker sandbox: test assertions failed."
+                          : t.execution_status === "Execution Timeout"
+                          ? "Test execution timed out in isolated sandbox."
+                          : "Generated test artifact. Host execution is prohibited."}
+                      </span>
                     </div>
 
                     {t.reproduction_scenario && (

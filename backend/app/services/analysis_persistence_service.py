@@ -12,7 +12,7 @@ re-derives or overrides a release-blocking decision, never executes any
 generated code or patch, and never performs any git/GitHub write operation.
 """
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from app.models.analysis_run import AnalysisRun
@@ -20,6 +20,7 @@ from app.models.patch import Patch
 from app.models.regression_test import RegressionTest
 from app.models.security_finding import SecurityFinding
 from app.models.release_readiness import ReleaseReadiness
+from app.models.validation_run import ValidationRun
 from app.agents.types import AgentResult, EngineResult
 
 _BLOCKING_SEVERITIES = {"high", "critical"}
@@ -53,11 +54,16 @@ def persist_engine_result(
 
     regression_result = _get_result(engine_result.results, "regression_test_synthesis")
     if regression_result is not None and regression_result.status == "success":
-        _persist_regression_test(db, run, repository_id, issue_id, regression_result)
+        _persist_regression_test(db, run, repository_id, issue_id, regression_result, engine_result.validation)
 
     security_result = _get_result(engine_result.results, "security_audit")
     if security_result is not None and security_result.status == "success":
         _persist_security_findings(db, run, repository_id, issue_id, security_result)
+
+    # Phase 7: persist validation run if available
+    val_run = None
+    if getattr(engine_result, "validation", None):
+        val_run = _persist_validation_run(db, run, repository_id, issue_id, engine_result.validation)
 
     release_result = _get_result(engine_result.results, "release")
     if release_result is not None and release_result.status == "success":
@@ -65,6 +71,12 @@ def persist_engine_result(
 
     db.commit()
     db.refresh(run)
+    if val_run:
+        db.refresh(val_run)
+        engine_result.validation["id"] = val_run.id
+        engine_result.validation["analysis_run_id"] = run.id
+        engine_result.validation["repository_id"] = repository_id
+        engine_result.validation["issue_id"] = issue_id
     return run
 
 
@@ -93,10 +105,29 @@ def _persist_patch(
 
 
 def _persist_regression_test(
-    db: Session, run: AnalysisRun, repository_id: int, issue_id: Optional[int], result: AgentResult
+    db: Session,
+    run: AnalysisRun,
+    repository_id: int,
+    issue_id: Optional[int],
+    result: AgentResult,
+    validation_data: Optional[Dict[str, Any]] = None,
 ) -> None:
     data = result.data
     test_code = data.get("test_code")
+
+    exec_status = "Generated — Not Executed"
+    if not test_code:
+        exec_status = "Not Generated"
+    elif validation_data:
+        val_status = validation_data.get("status")
+        if val_status == "passed":
+            exec_status = "Executed — Passed"
+        elif val_status == "failed":
+            exec_status = "Executed — Failed"
+        elif val_status == "timeout":
+            exec_status = "Execution Timeout"
+        elif val_status in ("validation_unavailable", "setup_failed"):
+            exec_status = "Validation Unavailable"
 
     db.add(
         RegressionTest(
@@ -105,7 +136,7 @@ def _persist_regression_test(
             issue_id=issue_id,
             mode=result.mode,
             status="Generated" if test_code else "Not Generated",
-            execution_status="Generated — Not Executed" if test_code else "Not Generated",
+            execution_status=exec_status,
             review_status="Pending Review",
             test_file=data.get("test_file"),
             purpose=data.get("purpose") or result.summary,
@@ -114,6 +145,31 @@ def _persist_regression_test(
             test_code=test_code,
         )
     )
+
+
+def _persist_validation_run(
+    db: Session,
+    run: AnalysisRun,
+    repository_id: int,
+    issue_id: Optional[int],
+    val_data: Dict[str, Any],
+) -> ValidationRun:
+    val_run = ValidationRun(
+        analysis_run_id=run.id,
+        repository_id=repository_id,
+        issue_id=issue_id,
+        status=val_data.get("status", "validation_unavailable"),
+        tests_run=bool(val_data.get("tests_run", False)),
+        exit_code=val_data.get("exit_code"),
+        stdout=val_data.get("stdout") or "",
+        stderr=val_data.get("stderr") or "",
+        duration_ms=int(val_data.get("duration_ms") or 0),
+        summary=val_data.get("summary"),
+        failure_reason=val_data.get("failure_reason"),
+        executed_command=val_data.get("executed_command"),
+    )
+    db.add(val_run)
+    return val_run
 
 
 def _persist_security_findings(

@@ -94,7 +94,13 @@ def test_analyze_persists_patch_test_security_release_rows(client, monkeypatch):
 
     tests = client.get("/api/v1/tests").json()
     assert len(tests) == 1
-    assert tests[0]["execution_status"] in {"Generated — Not Executed", "Not Generated"}
+    assert tests[0]["execution_status"] in {
+        "Generated — Not Executed",
+        "Not Generated",
+        "Executed — Passed",
+        "Executed — Failed",
+        "Validation Unavailable",
+    }
     assert tests[0]["issue_number"] == 7
 
     findings = client.get("/api/v1/security").json()

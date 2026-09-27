@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     # GitHub Integration
     GITHUB_CLIENT_ID: str = ""
     GITHUB_CLIENT_SECRET: str = ""
-    GITHUB_REDIRECT_URI: str = "http://localhost:3000/api/github/callback"
+    GITHUB_REDIRECT_URI: str = "http://localhost:8000/api/v1/github/auth/callback"
     GITHUB_API_BASE_URL: str = "https://api.github.com"
 
     # Phase 4 — AI Agent Engine
@@ -77,15 +77,35 @@ class Settings(BaseSettings):
     LLM_PROVIDER: str = "openai"
     LLM_MAX_TOKENS: int = 1024
 
+    # Phase 7 — Isolated Patch Validation & Test Execution
+    VALIDATION_ENABLED: bool = True
+    VALIDATION_SANDBOX_IMAGE: str = "patchpilot-sandbox:python3.13"
+    VALIDATION_DOCKER_IMAGE: str = "patchpilot-sandbox:python3.13"
+    VALIDATION_TIMEOUT_SECONDS: int = 60
+    VALIDATION_MEMORY_LIMIT: str = "512m"
+    VALIDATION_CPU_LIMIT: float = 1.0
+    VALIDATION_MAX_OUTPUT_BYTES: int = 200000
+    VALIDATION_NETWORK_MODE: str = "none"
+
     @property
     def github_configured(self) -> bool:
         """Check if GitHub OAuth credentials are configured."""
-        return bool(self.GITHUB_CLIENT_ID and self.GITHUB_CLIENT_SECRET)
+        return bool(
+            self.GITHUB_CLIENT_ID
+            and self.GITHUB_CLIENT_ID.strip()
+            and self.GITHUB_CLIENT_SECRET
+            and self.GITHUB_CLIENT_SECRET.strip()
+        )
 
     @property
     def ai_llm_configured(self) -> bool:
         """Check if the agent engine is configured to call a live LLM endpoint."""
         return self.AI_MODE.lower() == "llm" and bool(self.AI_BASE_URL)
+
+    @property
+    def validation_configured(self) -> bool:
+        """Check if patch validation layer is enabled."""
+        return self.VALIDATION_ENABLED
 
 
 settings = Settings()

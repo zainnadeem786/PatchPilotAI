@@ -26,86 +26,7 @@ import {
   SecurityIcon,
 } from "@/components/icons";
 
-type Metric = number | null; // null = still loading or failed — never a fabricated number
-
-interface DashboardData {
-  repositoryCount: Metric;
-  issueCount: Metric;
-  agentCount: Metric;
-  patchCount: Metric;
-  testCount: Metric;
-  securityCount: Metric;
-  releaseCount: Metric;
-  agents: AgentRegistryEntry[];
-  recentIssues: BackendIssue[];
-  recentPatches: PatchResponse[];
-  recentTests: RegressionTestResponse[];
-  recentSecurity: SecurityFindingResponse[];
-  recentReleases: ReleaseReadinessResponse[];
-  backendReachable: boolean | null;
-}
-
-function useDashboardData(): DashboardData {
-  const [state, setState] = useState<DashboardData>({
-    repositoryCount: null,
-    issueCount: null,
-    agentCount: null,
-    patchCount: null,
-    testCount: null,
-    securityCount: null,
-    releaseCount: null,
-    agents: [],
-    recentIssues: [],
-    recentPatches: [],
-    recentTests: [],
-    recentSecurity: [],
-    recentReleases: [],
-    backendReachable: null,
-  });
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      const [repos, issues, agents, patches, tests, security, releases, health] = await Promise.allSettled([
-        api.getRepositories(),
-        api.getIssues(),
-        api.getAgents(),
-        api.getPatches(),
-        api.getRegressionTests(),
-        api.getSecurityFindings(),
-        api.getReleases(),
-        api.isBackendAvailable(),
-      ]);
-
-      if (cancelled) return;
-
-      setState({
-        repositoryCount: repos.status === "fulfilled" ? repos.value.length : null,
-        issueCount: issues.status === "fulfilled" ? issues.value.length : null,
-        agentCount: agents.status === "fulfilled" ? agents.value.length : null,
-        patchCount: patches.status === "fulfilled" ? patches.value.length : null,
-        testCount: tests.status === "fulfilled" ? tests.value.length : null,
-        securityCount: security.status === "fulfilled" ? security.value.length : null,
-        releaseCount: releases.status === "fulfilled" ? releases.value.length : null,
-        agents: agents.status === "fulfilled" ? agents.value : [],
-        recentIssues: issues.status === "fulfilled" ? issues.value.slice(0, 3) : [],
-        recentPatches: patches.status === "fulfilled" ? patches.value.slice(0, 4) : [],
-        recentTests: tests.status === "fulfilled" ? tests.value.slice(0, 4) : [],
-        recentSecurity: security.status === "fulfilled" ? security.value.slice(0, 4) : [],
-        recentReleases: releases.status === "fulfilled" ? releases.value.slice(0, 1) : [],
-        backendReachable: health.status === "fulfilled" ? health.value : false,
-      });
-    }
-
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return state;
-}
+import { usePlatformStats, Metric } from "@/context/PlatformStatsContext";
 
 function MetricCard({
   label,
@@ -140,31 +61,40 @@ interface ActivityRow {
 }
 
 export default function OverviewPage() {
-  const data = useDashboardData();
+  const {
+    stats,
+    agents,
+    recentIssues,
+    recentPatches,
+    recentTests,
+    recentSecurity,
+    recentReleases,
+    backendReachable,
+  } = usePlatformStats();
 
   const activity: ActivityRow[] = [
-    ...data.recentPatches.map((p) => ({
+    ...recentPatches.map((p) => ({
       key: `patch-${p.id}`,
       title: p.summary || `Patch proposed for issue #${p.issue_number ?? "?"}`,
       timestamp: p.created_at,
       repo: p.repository_full_name ?? null,
       kind: "patch" as const,
     })),
-    ...data.recentTests.map((t) => ({
+    ...recentTests.map((t) => ({
       key: `test-${t.id}`,
       title: t.purpose || `Regression test generated for issue #${t.issue_number ?? "?"}`,
       timestamp: t.created_at,
       repo: t.repository_full_name ?? null,
       kind: "test" as const,
     })),
-    ...data.recentSecurity.map((s) => ({
+    ...recentSecurity.map((s) => ({
       key: `sec-${s.id}`,
       title: s.title,
       timestamp: s.created_at,
       repo: s.repository_full_name ?? null,
       kind: "security" as const,
     })),
-    ...data.recentReleases.map((r) => ({
+    ...recentReleases.map((r) => ({
       key: `rel-${r.id}`,
       title: r.release_ready ? "Release marked ready for human review" : "Release blocked pending review",
       timestamp: r.created_at,
@@ -175,12 +105,12 @@ export default function OverviewPage() {
     .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
     .slice(0, 5);
 
-  const latestRelease = data.recentReleases[0] ?? null;
+  const latestRelease = recentReleases[0] ?? null;
 
   return (
     <div className="space-y-6">
       {/* Backend unavailable banner — metrics below show "—" rather than fake numbers */}
-      {data.backendReachable === false && (
+      {backendReachable === false && (
         <div className="rounded-lg border border-amber-300/80 dark:border-amber-500/30 bg-amber-50/70 dark:bg-amber-950/30 p-4 flex items-start gap-2.5">
           <AlertIcon className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
           <div>
@@ -227,9 +157,9 @@ export default function OverviewPage() {
         </div>
 
         {/* Pipeline stage strip — informational only, derived from the real agent registry */}
-        {data.agents.length > 0 && (
+        {agents.length > 0 && (
           <div className="mt-4 pt-4 border-t border-cream-300/80 dark:border-slate-800/80 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5 text-[11px] font-mono">
-            {data.agents.map((agent, idx) => (
+            {agents.map((agent, idx) => (
               <div
                 key={agent.name}
                 className="py-1 px-2 rounded border text-center border-cream-300 dark:border-slate-800/80 bg-cream-50 dark:bg-slate-950/60 text-charcoal-500 dark:text-slate-400"
@@ -241,15 +171,15 @@ export default function OverviewPage() {
         )}
       </div>
 
-      {/* Metrics Row — every number sourced from a real API call */}
+      {/* Metrics Row — unified canonical stats sharing semantics with Sidebar */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <MetricCard label="Repositories" value={data.repositoryCount} icon={<RepoIcon className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />} />
-        <MetricCard label="Open Issues" value={data.issueCount} icon={<IssueIcon className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />} />
-        <MetricCard label="Agents" value={data.agentCount} icon={<AgentIcon className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />} />
-        <MetricCard label="Patches" value={data.patchCount} icon={<PatchIcon className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />} />
-        <MetricCard label="Tests" value={data.testCount} icon={<TestIcon className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />} />
-        <MetricCard label="Security Findings" value={data.securityCount} icon={<SecurityIcon className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />} />
-        <MetricCard label="Releases" value={data.releaseCount} icon={<ShieldIcon className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" />} />
+        <MetricCard label="Repositories" value={stats.repositoryCount} icon={<RepoIcon className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />} />
+        <MetricCard label="Open Issues" value={stats.openIssueCount} icon={<IssueIcon className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />} />
+        <MetricCard label="Agents" value={stats.agentCount} icon={<AgentIcon className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />} />
+        <MetricCard label="Patches" value={stats.patchCount} icon={<PatchIcon className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />} />
+        <MetricCard label="Tests" value={stats.testCount} icon={<TestIcon className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />} />
+        <MetricCard label="Security Findings" value={stats.securityCount} icon={<SecurityIcon className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />} />
+        <MetricCard label="Releases" value={stats.releaseCount} icon={<ShieldIcon className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" />} />
       </div>
 
       {/* Recent Issues */}
@@ -264,13 +194,13 @@ export default function OverviewPage() {
           </Link>
         </div>
 
-        {data.recentIssues.length === 0 ? (
+        {recentIssues.length === 0 ? (
           <div className="p-6 text-center text-xs font-mono text-charcoal-500 dark:text-slate-500 border border-dashed border-cream-300 dark:border-slate-800 rounded-lg">
             No issues tracked yet. Connect a repository to sync issues.
           </div>
         ) : (
           <div className="space-y-2">
-            {data.recentIssues.map((issue) => (
+            {recentIssues.map((issue) => (
               <Link
                 key={issue.id}
                 href={`/issues/${issue.id}`}

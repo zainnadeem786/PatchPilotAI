@@ -1,7 +1,7 @@
 """Sequential pipeline runner executing all AI Agent Engine agents in order."""
 
 import logging
-from typing import List
+from typing import Any, List
 from app.agents.base import BaseAgent
 from app.agents.types import AgentContext, AgentResult, EngineResult
 
@@ -24,9 +24,15 @@ class AgentPipeline:
     def __init__(self, agents: List[BaseAgent]):
         self.agents = agents
 
-    async def run(self, context: AgentContext) -> EngineResult:
+    async def run(self, context: AgentContext, validator: Any = None) -> EngineResult:
         """Execute every agent in order and return the aggregated `EngineResult`."""
         for agent in self.agents:
+            if agent.name == "release" and validator is not None and context.validation_result is None:
+                val = validator(context)
+                if hasattr(val, "__await__"):
+                    val = await val
+                context.validation_result = val
+
             result = await agent.safe_run(context)
             if result.status == "error":
                 logger.warning("Agent '%s' failed: %s", agent.name, result.error)
@@ -35,11 +41,19 @@ class AgentPipeline:
         results = list(context.previous_results.values())
         roadmap = self._build_roadmap(results)
 
+        val_dict = None
+        if context.validation_result is not None:
+            if hasattr(context.validation_result, "to_dict"):
+                val_dict = context.validation_result.to_dict()
+            elif isinstance(context.validation_result, dict):
+                val_dict = context.validation_result
+
         return EngineResult(
             repository_id=context.repository.id,
             issue_id=context.issue.id if context.issue else None,
             results=results,
             roadmap=roadmap,
+            validation=val_dict,
         )
 
     @staticmethod

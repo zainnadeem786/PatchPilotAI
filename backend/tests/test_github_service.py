@@ -2,6 +2,7 @@
 
 import pytest
 import httpx
+from fastapi.testclient import TestClient
 from app.services.github_service import (
     GitHubService,
     validate_repo_identifier,
@@ -215,5 +216,55 @@ async def test_get_repository_counts_single_pr(monkeypatch):
     issues_cnt, prs_cnt = await service.get_repository_counts("owner", "repo", combined_count=3)
     assert prs_cnt == 1
     assert issues_cnt == 2
+
+
+def test_github_oauth_start_endpoint_unconfigured_error(client: TestClient, monkeypatch):
+    """Verify GET /api/v1/github/auth/start returns clear 503 configuration error when credentials missing."""
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "GITHUB_CLIENT_ID", "")
+    monkeypatch.setattr(settings, "GITHUB_CLIENT_SECRET", "")
+
+    resp = client.get("/api/v1/github/auth/start")
+    assert resp.status_code == 503
+    data = resp.json()
+    assert "detail" in data
+    assert "GitHub OAuth is not configured" in data["detail"]
+    assert "Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET" in data["detail"]
+    # Verify it is NOT misclassified as a rate limit (429) or network/connection error (502)
+    assert resp.status_code != 429
+    assert resp.status_code != 502
+
+
+def test_github_oauth_callback_endpoint_unconfigured_error(client: TestClient, monkeypatch):
+    """Verify GET /api/v1/github/auth/callback returns clear 503 configuration error when credentials missing."""
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "GITHUB_CLIENT_ID", "")
+    monkeypatch.setattr(settings, "GITHUB_CLIENT_SECRET", "")
+
+    resp = client.get("/api/v1/github/auth/callback?code=mock_code&state=mock_state")
+    assert resp.status_code == 503
+    data = resp.json()
+    assert "detail" in data
+    assert "GitHub OAuth is not configured" in data["detail"]
+    assert "Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET" in data["detail"]
+    assert resp.status_code != 429
+    assert resp.status_code != 502
+
+
+def test_github_oauth_start_endpoint_configured_success(client: TestClient, monkeypatch):
+    """Verify GET /api/v1/github/auth/start returns authorization URL with actual local callback route."""
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "GITHUB_CLIENT_ID", "test_client_id_123")
+    monkeypatch.setattr(settings, "GITHUB_CLIENT_SECRET", "test_client_secret_456")
+
+    resp = client.get("/api/v1/github/auth/start")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "authorization_url" in data
+    assert "state" in data
+    auth_url = data["authorization_url"]
+    assert "https://github.com/login/oauth/authorize" in auth_url
+    assert "client_id=test_client_id_123" in auth_url
+    assert "redirect_uri=http%3A%2F%2Flocalhost%3A8000%2Fapi%2Fv1%2Fgithub%2Fauth%2Fcallback" in auth_url
 
 

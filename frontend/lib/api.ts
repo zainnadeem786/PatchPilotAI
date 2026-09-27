@@ -11,6 +11,7 @@ import {
   RegressionTestResponse,
   SecurityFindingResponse,
   ReleaseReadinessResponse,
+  ValidationRunResponse,
 } from "@/types/api";
 
 const API_BASE_URL =
@@ -317,6 +318,53 @@ export class ApiClient {
   /** Calls GET /api/v1/releases/{id} */
   async getRelease(id: number | string): Promise<ReleaseReadinessResponse> {
     return this.getDetail<ReleaseReadinessResponse>("/api/v1/releases", id);
+  }
+
+  /** Calls GET /api/v1/validation */
+  async getValidationRuns(
+    repositoryId?: number | string,
+    issueId?: number | string,
+    analysisRunId?: number | string
+  ): Promise<ValidationRunResponse[]> {
+    const params = new URLSearchParams();
+    if (repositoryId !== undefined && repositoryId !== null) params.append("repository_id", String(repositoryId));
+    if (issueId !== undefined && issueId !== null) params.append("issue_id", String(issueId));
+    if (analysisRunId !== undefined && analysisRunId !== null) params.append("analysis_run_id", String(analysisRunId));
+    const queryStr = params.toString() ? `?${params.toString()}` : "";
+    const url = `${this.baseUrl}/api/v1/validation${queryStr}`;
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to load validation runs (HTTP ${response.status})`);
+    }
+
+    return response.json();
+  }
+
+  /** Calls GET /api/v1/validation/{id} */
+  async getValidationRun(id: number | string): Promise<ValidationRunResponse> {
+    return this.getDetail<ValidationRunResponse>("/api/v1/validation", id);
+  }
+
+  /** Calls POST /api/v1/analysis/{analysis_id}/validate */
+  async validateAnalysis(analysisId: number | string): Promise<ValidationRunResponse> {
+    const url = `${this.baseUrl}/api/v1/analysis/${analysisId}/validate`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { Accept: "application/json" },
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(`Validation failed (HTTP ${response.status}): ${errorBody}`);
+    }
+
+    return response.json();
   }
 
   getBaseUrl(): string {
