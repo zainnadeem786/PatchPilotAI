@@ -123,6 +123,10 @@ export const PlatformStatsProvider: React.FC<{ children: React.ReactNode }> = ({
         repositoryCount: repos !== null ? repos.length : null,
         totalIssueCount: repoTotalOpenIssues,
         openIssueCount: repoTotalOpenIssues,
+      setStats({
+        repositoryCount: repos !== null ? repos.length : null,
+        totalIssueCount: issues !== null ? issues.length : null,
+        openIssueCount: issues !== null ? issues.filter((i) => i.state === "open").length : null,
         agentCount: agentList !== null ? agentList.length : null,
         patchCount: patches !== null ? patches.length : null,
         testCount: tests !== null ? tests.length : null,
@@ -132,6 +136,7 @@ export const PlatformStatsProvider: React.FC<{ children: React.ReactNode }> = ({
 
       if (agentList) setAgents(agentList);
       if (issueItems.length > 0) setRecentIssues(issueItems.slice(0, 3));
+      if (issues) setRecentIssues(issues.slice(0, 3));
       if (patches) setRecentPatches(patches.slice(0, 4));
       if (tests) setRecentTests(tests.slice(0, 4));
       if (security) setRecentSecurity(security.slice(0, 4));
