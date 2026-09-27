@@ -1,6 +1,6 @@
 """Application configuration management using Pydantic Settings."""
 
-from typing import List, Union
+from typing import List, Union, Optional
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import json
@@ -24,6 +24,7 @@ class Settings(BaseSettings):
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ]
+    BACKEND_CORS_ORIGIN_REGEX: Optional[str] = None
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod
@@ -31,11 +32,16 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             if v.startswith("[") and v.endswith("]"):
                 try:
-                    return json.loads(v)
+                    parsed = json.loads(v)
+                    if isinstance(parsed, list):
+                        return [str(i).strip().rstrip("/") for i in parsed if str(i).strip()]
                 except Exception:
                     pass
-            return [i.strip() for i in v.split(",") if i.strip()]
+            return [i.strip().rstrip("/") for i in v.split(",") if i.strip()]
+        elif isinstance(v, list):
+            return [str(i).strip().rstrip("/") for i in v if str(i).strip()]
         return v
+
 
     # Database
     DATABASE_URL: str = (
