@@ -1,93 +1,48 @@
-"""Verification tests for Vercel serverless entrypoint, routing adaptation, and CORS configuration."""
+"""Verification tests for Vercel native FastAPI entrypoint and CORS configuration."""
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from api.index import app
+from main import app
+from app.main import app as canonical_app
 from app.core.config import Settings
 
 
-def test_vercel_entrypoint_app_instance():
-    """Verify that api.index exports a valid FastAPI instance."""
+def test_vercel_native_entrypoint_app_instance():
+    """Verify that main exports the canonical FastAPI instance."""
     assert isinstance(app, FastAPI)
+    assert app is canonical_app
     assert app.title == "PatchPilot API"
 
 
-def test_vercel_entrypoint_endpoints():
-    """Verify routes are accessible directly via the Vercel entrypoint."""
+def test_vercel_native_entrypoint_endpoints():
+    """Verify all required production routes are accessible via the native entrypoint."""
     client = TestClient(app)
 
-    # Root endpoint
+    # 1. Root endpoint: GET /
     root_res = client.get("/")
     assert root_res.status_code == 200
     root_data = root_res.json()
     assert "service" in root_data
     assert root_data["health"] == "/api/health"
+    assert root_data["docs"] == "/docs"
 
-    # API Health endpoint
+    # 2. Operational Health endpoint: GET /api/health
     health_res = client.get("/api/health")
     assert health_res.status_code == 200
     assert health_res.json() == {"status": "ok", "service": "patchpilot-api"}
 
-    # Versioned API Health endpoint
+    # 3. Versioned Health endpoint: GET /api/v1/health
     v1_health_res = client.get("/api/v1/health")
     assert v1_health_res.status_code == 200
     assert v1_health_res.json() == {"status": "ok", "service": "patchpilot-api"}
 
-    # Docs endpoint
+    # 4. Interactive Swagger documentation: GET /docs
     docs_res = client.get("/docs")
     assert docs_res.status_code == 200
 
-    # OpenAPI JSON endpoint
+    # 5. OpenAPI schema endpoint: GET /api/v1/openapi.json
     openapi_res = client.get("/api/v1/openapi.json")
     assert openapi_res.status_code == 200
-
-
-def test_vercel_rewrite_routing_scenarios():
-    """Verify Vercel rewrite headers and prefix variations are properly adapted."""
-    client = TestClient(app)
-
-    # 1. Vercel rewrites incoming /api/health to function /api/index.py with x-matched-path
-    r1 = client.get("/api/index.py", headers={"x-matched-path": "/api/health"})
-    assert r1.status_code == 200
-    assert r1.json() == {"status": "ok", "service": "patchpilot-api"}
-
-    # 2. Vercel rewrites incoming / to function /api/index.py with x-matched-path
-    r2 = client.get("/api/index.py", headers={"x-matched-path": "/"})
-    assert r2.status_code == 200
-    assert "service" in r2.json()
-
-    # 3. Vercel rewrites incoming /docs to function /api/index.py with x-matched-path
-    r3 = client.get("/api/index.py", headers={"x-matched-path": "/docs"})
-    assert r3.status_code == 200
-
-    # 4. Vercel rewrites incoming /api/v1/health with x-matched-path
-    r4 = client.get("/api/index.py", headers={"x-matched-path": "/api/v1/health"})
-    assert r4.status_code == 200
-    assert r4.json() == {"status": "ok", "service": "patchpilot-api"}
-
-    # 5. Vercel rewrites incoming /api/v1/openapi.json with x-matched-path
-    r5 = client.get("/api/index.py", headers={"x-matched-path": "/api/v1/openapi.json"})
-    assert r5.status_code == 200
-
-    # 6. Fallback when request hits /api/index.py without routing headers
-    r6 = client.get("/api/index.py")
-    assert r6.status_code == 200
-    assert "service" in r6.json()
-
-    # 7. Unprefixed /health adaptation
-    r7 = client.get("/health")
-    assert r7.status_code == 200
-    assert r7.json() == {"status": "ok", "service": "patchpilot-api"}
-
-    # 8. Unprefixed /v1/health adaptation
-    r8 = client.get("/v1/health")
-    assert r8.status_code == 200
-    assert r8.json() == {"status": "ok", "service": "patchpilot-api"}
-
-    # 9. Trailing slash normalization
-    r9 = client.get("/api/health/")
-    assert r9.status_code == 200
-    assert r9.json() == {"status": "ok", "service": "patchpilot-api"}
 
 
 def test_cors_settings_parsing():
